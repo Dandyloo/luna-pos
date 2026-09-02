@@ -1,60 +1,36 @@
-import './style.css'
-import heroImg from './assets/hero.png'
-import javascriptLogo from './assets/javascript.svg'
-import viteLogo from './assets/vite.svg'
-import { setupCounter } from './counter.js'
+import './styles/tokens.css'
+import './styles/global.css'
 
-document.querySelector('#app').innerHTML = `
-<section id="center">
-  <div class="hero">
-    <img src="${heroImg}" class="base" width="170" height="179">
-    <img src="${javascriptLogo}" class="framework" alt="JavaScript logo"/>
-    <img src="${viteLogo}" class="vite" alt="Vite logo" />
-  </div>
-  <div>
-    <h1>Get started</h1>
-    <p>Edit <code>src/main.js</code> and save to test <code>HMR</code></p>
-  </div>
-  <button id="counter" type="button" class="counter"></button>
-</section>
+const app = document.querySelector('#app')
 
-<div class="ticks"></div>
+app.innerHTML = `
+  <main class="app-shell">
+    <section class="setup-card" aria-labelledby="setup-title">
+      <div class="brand-mark" aria-hidden="true">
+        <span class="brand-mark__moon">◒</span>
+        <span class="brand-mark__word">LUNA</span>
+      </div>
 
-<section id="next-steps">
-  <div id="docs">
-    <svg class="icon" role="presentation" aria-hidden="true"><use href="/icons.svg#documentation-icon"></use></svg>
-    <h2>Documentation</h2>
-    <p>Your questions, answered</p>
-    <ul>
-      <li>
-        <a href="https://vite.dev/" target="_blank">
-          <img class="logo" src="${viteLogo}" alt="" />
-          Explore Vite
-        </a>
-      </li>
-      <li>
-        <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript" target="_blank">
-          <img class="button-icon" src="${javascriptLogo}" alt="">
-          Learn more
-        </a>
-      </li>
-    </ul>
-  </div>
-  <div id="social">
-    <svg class="icon" role="presentation" aria-hidden="true"><use href="/icons.svg#social-icon"></use></svg>
-    <h2>Connect with us</h2>
-    <p>Join the Vite community</p>
-    <ul>
-      <li><a href="https://github.com/vitejs/vite" target="_blank"><svg class="button-icon" role="presentation" aria-hidden="true"><use href="/icons.svg#github-icon"></use></svg>GitHub</a></li>
-      <li><a href="https://chat.vite.dev/" target="_blank"><svg class="button-icon" role="presentation" aria-hidden="true"><use href="/icons.svg#discord-icon"></use></svg>Discord</a></li>
-      <li><a href="https://x.com/vite_js" target="_blank"><svg class="button-icon" role="presentation" aria-hidden="true"><use href="/icons.svg#x-icon"></use></svg>X.com</a></li>
-      <li><a href="https://bsky.app/profile/vite.dev" target="_blank"><svg class="button-icon" role="presentation" aria-hidden="true"><use href="/icons.svg#bluesky-icon"></use></svg>Bluesky</a></li>
-    </ul>
-  </div>
-</section>
+      <p class="eyebrow">Café & Eatery Operations System</p>
 
-<div class="ticks"></div>
-<section id="spacer"></section>
+      <h1 id="setup-title">Luna POS is ready to build.</h1>
+
+      <p class="setup-card__description">
+        Staff POS, customer display, and owner Back Office—built for fast,
+        reliable café operations.
+      </p>
+
+      <div class="setup-card__badges" aria-label="Project modules">
+        <span class="badge">Staff POS</span>
+        <span class="badge">Customer Display</span>
+        <span class="badge">Back Office</span>
+        <span class="badge">Offline-first</span>
+      </div>
+
+      <div class="setup-card__status" role="status">
+        <span class="status-dot" aria-hidden="true"></span>
+        <span>Phase 0 foundation complete</span>
+      </div>
+    </section>
+  </main>
 `
-
-setupCounter(document.querySelector('#counter'))
