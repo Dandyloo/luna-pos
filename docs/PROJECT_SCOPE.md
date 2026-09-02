@@ -66,3 +66,14 @@ An owner/manager application that provides:
 A staff member can create a café order, choose a product variant, change quantity, add tax or a discount, record payment, create a receipt-ready order record, and show the customer a live read-only version of the order.
 
 An owner can later see reliable daily sales, payments, discounts, taxes, product performance, and estimated profit information.
+
+## Confirmed menu rules
+
+- The menu source is `Luna_Cafe_Full_Menu.docx`.
+- Pizza items are fixed-price items in the first version; no pizza size variants are currently configured.
+- Luna Boba items may use 500ML and/or 700ML variants only where a price is listed.
+- A missing 500ML price means that the boba product is available only in 700ML.
+- “Extra Boba / Extra Popping” is one combined selectable extra priced at GH₵10.
+- “Extra Cheese Foam” is a separate selectable extra priced at GH₵15.
+- Individual product images will be supplied later and placed under `public/images/products/`.
+- Product cost prices are currently unknown and must be supplied by the owner before true profit calculations are enabled.
