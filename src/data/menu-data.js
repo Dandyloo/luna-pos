@@ -214,9 +214,9 @@ export const menuItems = [
     imageFolder: 'pastries',
   }),
   createFixedProduct({
-    id: 'kish-pie',
+    id: 'fish-pie',
     categoryId: 'pastries',
-    name: 'Kish Pie',
+    name: 'Fish Pie',
     price: 20,
     imageFolder: 'pastries',
   }),

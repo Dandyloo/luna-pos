@@ -6,6 +6,8 @@ import './styles/pos.css'
 import { renderItemCustomizationDialog } from './components/item-customization-dialog.js'
 import { renderNoProductsState, renderProductCard } from './components/product-card.js'
 import { categories, menuItems, modifierGroups } from './data/menu-data.js'
+import { calculateOrderTotals, clampNumber } from './utils/financial-utils.js'
+import { formatShortGhs } from './utils/formatters.js'
 import { getAppUrl, getCurrentApp } from './modules/app-router.js'
 import {
   addCartItem,
@@ -18,12 +20,12 @@ import {
 } from './utils/order-utils.js'
 import {
   getCategoryById,
-  getProductStartingPrice,
   handleProductImageError,
 } from './utils/product-utils.js'
-import { formatShortGhs } from './utils/formatters.js'
 
 const app = document.querySelector('#app')
+
+const DEMO_TAX_RATE = 0.15
 
 const applicationCards = [
   {
@@ -85,6 +87,11 @@ const posState = {
   orderType: 'dine-in',
   cartItems: [],
   activeProductId: null,
+  isTaxEnabled: false,
+  isDiscountEnabled: false,
+  discountType: 'percentage',
+  discountValue: '',
+  discountError: '',
 }
 
 function escapeHtml(value) {
@@ -94,6 +101,17 @@ function escapeHtml(value) {
     .replaceAll('>', '&gt;')
     .replaceAll('"', '&quot;')
     .replaceAll("'", '&#039;')
+}
+
+function getOrderTotals() {
+  return calculateOrderTotals({
+    subtotal: getCartSubtotal(posState.cartItems),
+    isDiscountEnabled: posState.isDiscountEnabled,
+    discountType: posState.discountType,
+    discountValue: posState.discountValue,
+    isTaxEnabled: posState.isTaxEnabled,
+    taxRate: DEMO_TAX_RATE,
+  })
 }
 
 function renderLauncher() {
@@ -255,6 +273,9 @@ function renderCartItem(cartItem) {
         class="cart-item__image"
         src="${cartItem.image}"
         alt=""
+        width="640"
+        height="640"
+        loading="lazy"
         data-fallback-image="${cartItem.fallbackImage}"
       />
 
@@ -300,8 +321,114 @@ function renderCartItem(cartItem) {
   `
 }
 
+function renderAdjustments(totals, hasItems) {
+  const discountSummary = posState.isDiscountEnabled
+    ? posState.discountType === 'percentage'
+      ? `${posState.discountValue || 0}% selected`
+      : `${formatShortGhs(Number(posState.discountValue) || 0)} selected`
+    : 'Not applied'
+
+  return `
+    <section class="order-panel__adjustments" aria-label="Order adjustments">
+      <section class="order-adjustment">
+        <div class="order-adjustment__header">
+          <span class="order-adjustment__label">Tax</span>
+
+          <button
+            class="toggle-control"
+            type="button"
+            data-toggle-tax
+            aria-label="Toggle tax"
+            aria-pressed="${posState.isTaxEnabled}"
+            ${hasItems ? '' : 'disabled'}
+          ></button>
+        </div>
+
+        <span class="order-adjustment__value">
+          ${
+            posState.isTaxEnabled
+              ? `${(DEMO_TAX_RATE * 100).toFixed(0)}% tax is applied`
+              : 'Tax is not applied'
+          }
+        </span>
+      </section>
+
+      <section class="order-adjustment">
+        <div class="order-adjustment__header">
+          <span class="order-adjustment__label">Discount</span>
+
+          <button
+            class="toggle-control"
+            type="button"
+            data-toggle-discount
+            aria-label="Toggle discount"
+            aria-pressed="${posState.isDiscountEnabled}"
+            ${hasItems ? '' : 'disabled'}
+          ></button>
+        </div>
+
+        <span class="order-adjustment__value">${discountSummary}</span>
+
+        <div class="order-adjustment__controls">
+          <select
+            class="adjustment-select"
+            data-discount-type
+            aria-label="Discount type"
+            ${posState.isDiscountEnabled && hasItems ? '' : 'disabled'}
+          >
+            <option value="percentage" ${
+              posState.discountType === 'percentage' ? 'selected' : ''
+            }>
+              Percentage
+            </option>
+            <option value="fixed" ${
+              posState.discountType === 'fixed' ? 'selected' : ''
+            }>
+              Fixed amount
+            </option>
+          </select>
+
+          <input
+            class="adjustment-input"
+            type="number"
+            inputmode="decimal"
+            min="0"
+            max="${
+              posState.discountType === 'percentage' ? '100' : totals.subtotal
+            }"
+            step="0.01"
+            placeholder="${
+              posState.discountType === 'percentage' ? '0–100' : 'Amount'
+            }"
+            value="${escapeHtml(posState.discountValue)}"
+            data-discount-value
+            aria-label="Discount value"
+            ${posState.isDiscountEnabled && hasItems ? '' : 'disabled'}
+          />
+        </div>
+
+        ${
+          posState.discountType === 'percentage'
+            ? '<p class="order-adjustment__hint">Enter a discount from 0% to 100%.</p>'
+            : `<p class="order-adjustment__hint">Maximum discount: ${formatShortGhs(
+                totals.subtotal,
+              )}</p>`
+        }
+
+        ${
+          posState.discountError
+            ? `<p class="order-adjustment__error" role="alert">${escapeHtml(
+                posState.discountError,
+              )}</p>`
+            : ''
+        }
+      </section>
+    </section>
+  `
+}
+
 function renderOrderPanel() {
-  const subtotal = getCartSubtotal(posState.cartItems)
+  const totals = getOrderTotals()
   const cartQuantity = getCartQuantity(posState.cartItems)
   const hasItems = posState.cartItems.length > 0
 
@@ -347,24 +474,41 @@ function renderOrderPanel() {
           `
       }
 
+      ${renderAdjustments(totals, hasItems)}
+
       <footer class="order-panel__footer">
         <div class="order-panel__summary">
           <div class="order-summary-row">
             <span>Subtotal</span>
             <span class="order-summary-row__value">
-              ${formatShortGhs(subtotal)}
+              ${formatShortGhs(totals.subtotal)}
             </span>
           </div>
 
+          ${
+            totals.discountAmount > 0
+              ? `
+                <div class="order-summary-row">
+                  <span>Discount</span>
+                  <span class="order-summary-row__value">
+                    − ${formatShortGhs(totals.discountAmount)}
+                  </span>
+                </div>
+              `
+              : ''
+          }
+
           <div class="order-summary-row">
             <span>Tax</span>
-            <span class="order-summary-row__value">GH₵ 0.00</span>
+            <span class="order-summary-row__value">
+              ${formatShortGhs(totals.taxAmount)}
+            </span>
           </div>
 
           <div class="order-summary-row order-summary-row--total">
             <span>Total</span>
             <span class="order-summary-row__value">
-              ${formatShortGhs(subtotal)}
+              ${formatShortGhs(totals.total)}
             </span>
           </div>
         </div>
@@ -630,6 +774,36 @@ function addCustomizedProductToCart() {
   renderPos()
 }
 
+function validateDiscountValue(value) {
+  if (!posState.isDiscountEnabled || value === '') {
+    return ''
+  }
+
+  const numericValue = Number(value)
+
+  if (!Number.isFinite(numericValue) || numericValue < 0) {
+    return 'Enter a valid discount value.'
+  }
+
+  if (posState.discountType === 'percentage' && numericValue > 100) {
+    return 'Percentage discount cannot be more than 100%.'
+  }
+
+  const subtotal = getCartSubtotal(posState.cartItems)
+
+  if (posState.discountType === 'fixed' && numericValue > subtotal) {
+    return `Fixed discount cannot exceed ${formatShortGhs(subtotal)}.`
+  }
+
+  return ''
+}
+
+function updateDiscountValue(value) {
+  posState.discountValue = value
+  posState.discountError = validateDiscountValue(value)
+  renderPos()
+}
+
 function attachPosEventListeners() {
   const searchInput = document.querySelector('.pos-search__input')
 
@@ -684,6 +858,7 @@ function attachPosEventListeners() {
         cartItem.quantity + 1,
       )
 
+      posState.discountError = validateDiscountValue(posState.discountValue)
       renderPos()
     })
   })
@@ -705,13 +880,41 @@ function attachPosEventListeners() {
         cartItem.quantity - 1,
       )
 
+      posState.discountError = validateDiscountValue(posState.discountValue)
       renderPos()
     })
   })
 
   document.querySelector('[data-clear-order]')?.addEventListener('click', () => {
     posState.cartItems = []
+    posState.isTaxEnabled = false
+    posState.isDiscountEnabled = false
+    posState.discountValue = ''
+    posState.discountError = ''
     renderPos()
+  })
+
+  document.querySelector('[data-toggle-tax]')?.addEventListener('click', () => {
+    posState.isTaxEnabled = !posState.isTaxEnabled
+    renderPos()
+  })
+
+  document
+    .querySelector('[data-toggle-discount]')
+    ?.addEventListener('click', () => {
+      posState.isDiscountEnabled = !posState.isDiscountEnabled
+      posState.discountError = validateDiscountValue(posState.discountValue)
+      renderPos()
+    })
+
+  document.querySelector('[data-discount-type]')?.addEventListener('change', (event) => {
+    posState.discountType = event.target.value
+    posState.discountError = validateDiscountValue(posState.discountValue)
+    renderPos()
+  })
+
+  document.querySelector('[data-discount-value]')?.addEventListener('input', (event) => {
+    updateDiscountValue(event.target.value)
   })
 
   document.querySelectorAll('[data-close-customization]').forEach((button) => {
