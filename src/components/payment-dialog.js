@@ -80,7 +80,6 @@ export function renderPaymentDialog({ total, paymentMethod, cashReceived, error 
                   <input
                     class="cash-payment__input"
                     id="cash-received"
-                    data-field-name="cash-received"
                     type="number"
                     inputmode="decimal"
                     min="0"
@@ -94,12 +93,16 @@ export function renderPaymentDialog({ total, paymentMethod, cashReceived, error 
                   <div class="cash-payment__summary">
                     <div class="cash-payment__row">
                       <span>Balance</span>
-                      <strong>${formatShortGhs(balance)}</strong>
+                      <strong data-payment-balance>
+                        ${formatShortGhs(balance)}
+                      </strong>
                     </div>
 
                     <div class="cash-payment__row cash-payment__row--change">
                       <span>Change</span>
-                      <strong>${formatShortGhs(change)}</strong>
+                      <strong data-payment-change>
+                        ${formatShortGhs(change)}
+                      </strong>
                     </div>
                   </div>
                 </section>
@@ -125,11 +128,14 @@ export function renderPaymentDialog({ total, paymentMethod, cashReceived, error 
               `
           }
 
-          ${
-            error
-              ? `<p class="payment-dialog__error" role="alert">${error}</p>`
-              : ''
-          }
+          <p
+            class="payment-dialog__error"
+            data-payment-error
+            role="alert"
+            ${error ? '' : 'hidden'}
+          >
+            ${error}
+          </p>
         </div>
 
         <footer class="payment-dialog__footer">

@@ -1,18 +1,15 @@
-import "./styles/tokens.css";
-import "./styles/global.css";
-import "./styles/launcher.css";
-import "./styles/pos.css";
-import { renderPaymentDialog } from "./components/payment-dialog.js";
+import './styles/tokens.css'
+import './styles/global.css'
+import './styles/launcher.css'
+import './styles/pos.css'
 
-import { renderItemCustomizationDialog } from "./components/item-customization-dialog.js";
-import {
-  renderNoProductsState,
-  renderProductCard,
-} from "./components/product-card.js";
-import { categories, menuItems, modifierGroups } from "./data/menu-data.js";
-import { calculateOrderTotals, clampNumber } from "./utils/financial-utils.js";
-import { formatShortGhs } from "./utils/formatters.js";
-import { getAppUrl, getCurrentApp } from "./modules/app-router.js";
+import { renderItemCustomizationDialog } from './components/item-customization-dialog.js'
+import { renderPaymentDialog } from './components/payment-dialog.js'
+import { renderNoProductsState, renderProductCard } from './components/product-card.js'
+import { categories, menuItems, modifierGroups } from './data/menu-data.js'
+import { calculateOrderTotals } from './utils/financial-utils.js'
+import { formatShortGhs } from './utils/formatters.js'
+import { getAppUrl, getCurrentApp } from './modules/app-router.js'
 import {
   addCartItem,
   createCartItem,
@@ -21,138 +18,92 @@ import {
   getCartQuantity,
   getCartSubtotal,
   updateCartItemQuantity,
-} from "./utils/order-utils.js";
-import {
-  getCategoryById,
-  handleProductImageError,
-} from "./utils/product-utils.js";
+} from './utils/order-utils.js'
+import { getCategoryById, handleProductImageError } from './utils/product-utils.js'
 
-const app = document.querySelector("#app");
+const app = document.querySelector('#app')
 
-const DEMO_TAX_RATE = 0.15;
+const DEMO_TAX_RATE = 0.15
 
 const applicationCards = [
   {
-    appName: "pos",
-    icon: "POS",
-    label: "Counter tablet",
-    title: "Staff POS",
+    appName: 'pos',
+    icon: 'POS',
+    label: 'Counter tablet',
+    title: 'Staff POS',
     description:
-      "The fast, touch-friendly workspace for taking café orders and recording payments.",
+      'The fast, touch-friendly workspace for taking café orders and recording payments.',
     features: [
-      "Menu, variants, add-ons",
-      "Tax, discounts, and payments",
-      "Offline-first order records",
+      'Menu, variants, add-ons',
+      'Tax, discounts, and payments',
+      'Offline-first order records',
     ],
-    linkText: "Open Staff POS",
+    linkText: 'Open Staff POS',
   },
   {
-    appName: "customer-display",
-    icon: "CD",
-    label: "Second tablet",
-    title: "Customer Display",
+    appName: 'customer-display',
+    icon: 'CD',
+    label: 'Second tablet',
+    title: 'Customer Display',
     description:
-      "A live, read-only view that lets the customer confirm their order and follow its status.",
+      'A live, read-only view that lets the customer confirm their order and follow its status.',
     features: [
-      "Live basket and order total",
-      "Payment confirmation prompts",
-      "Preparing and ready states",
+      'Live basket and order total',
+      'Payment confirmation prompts',
+      'Preparing and ready states',
     ],
-    linkText: "Open Customer Display",
+    linkText: 'Open Customer Display',
   },
   {
-    appName: "back-office",
-    icon: "BO",
-    label: "Owner workspace",
-    title: "Back Office",
+    appName: 'back-office',
+    icon: 'BO',
+    label: 'Owner workspace',
+    title: 'Back Office',
     description:
-      "The control centre for menu management, operations, reports, daily sales, and profit.",
+      'The control centre for menu management, operations, reports, daily sales, and profit.',
     features: [
-      "Orders and sales reporting",
-      "Items, prices, costs, settings",
-      "Daily profit and expense tracking",
+      'Orders and sales reporting',
+      'Items, prices, costs, settings',
+      'Daily profit and expense tracking',
     ],
-    linkText: "Open Back Office",
+    linkText: 'Open Back Office',
   },
-];
+]
 
 const posNavigation = [
-  { icon: "01", label: "New Order", isActive: true },
-  { icon: "02", label: "Orders", isActive: false },
-  { icon: "03", label: "Sales", isActive: false },
-  { icon: "04", label: "Items", isActive: false },
-  { icon: "05", label: "Settings", isActive: false },
-];
+  { icon: '01', label: 'New Order', isActive: true },
+  { icon: '02', label: 'Orders', isActive: false },
+  { icon: '03', label: 'Sales', isActive: false },
+  { icon: '04', label: 'Items', isActive: false },
+  { icon: '05', label: 'Settings', isActive: false },
+]
 
 const posState = {
-  selectedCategoryId: "all",
-  searchQuery: "",
+  selectedCategoryId: 'all',
+  searchQuery: '',
   showPopularOnly: false,
-  orderType: "dine-in",
+  orderType: 'dine-in',
   cartItems: [],
   activeProductId: null,
   isTaxEnabled: false,
   isDiscountEnabled: false,
-  discountType: "percentage",
-  discountValue: "",
-  discountError: "",
+  discountType: 'percentage',
+  discountValue: '',
+  discountError: '',
   isPaymentDialogOpen: false,
-  paymentMethod: "cash",
-  cashReceived: "",
-  paymentError: "",
+  paymentMethod: 'cash',
+  cashReceived: '',
+  paymentError: '',
   lastCompletedOrder: null,
-};
+}
 
 function escapeHtml(value) {
   return String(value)
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#039;");
-}
-
-function captureFocusedInput() {
-  const activeElement = document.activeElement;
-
-  if (!(activeElement instanceof HTMLInputElement)) {
-    return null;
-  }
-
-  const fieldName = activeElement.dataset.fieldName;
-
-  if (!fieldName) {
-    return null;
-  }
-
-  return {
-    fieldName,
-    selectionStart: activeElement.selectionStart,
-    selectionEnd: activeElement.selectionEnd,
-  };
-}
-
-function restoreFocusedInput(focusState) {
-  if (!focusState) {
-    return;
-  }
-
-  const input = document.querySelector(
-    `[data-field-name="${focusState.fieldName}"]`,
-  );
-
-  if (!(input instanceof HTMLInputElement) || input.disabled) {
-    return;
-  }
-
-  input.focus();
-
-  if (
-    typeof focusState.selectionStart === "number" &&
-    typeof focusState.selectionEnd === "number"
-  ) {
-    input.setSelectionRange(focusState.selectionStart, focusState.selectionEnd);
-  }
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#039;')
 }
 
 function getOrderTotals() {
@@ -163,7 +114,33 @@ function getOrderTotals() {
     discountValue: posState.discountValue,
     isTaxEnabled: posState.isTaxEnabled,
     taxRate: DEMO_TAX_RATE,
-  });
+  })
+}
+
+function getVisibleProducts() {
+  const normalizedQuery = posState.searchQuery.trim().toLowerCase()
+
+  return menuItems.filter((product) => {
+    const matchesCategory =
+      posState.selectedCategoryId === 'all' ||
+      product.categoryId === posState.selectedCategoryId
+
+    const matchesPopular = !posState.showPopularOnly || product.isPopular
+
+    const searchableText = [
+      product.name,
+      product.description,
+      getCategoryById(product.categoryId)?.name ?? '',
+      ...product.variants.map((variant) => variant.name),
+    ]
+      .join(' ')
+      .toLowerCase()
+
+    const matchesSearch =
+      normalizedQuery === '' || searchableText.includes(normalizedQuery)
+
+    return matchesCategory && matchesPopular && matchesSearch
+  })
 }
 
 function renderLauncher() {
@@ -180,7 +157,7 @@ function renderLauncher() {
           <p class="launcher-card__description">${card.description}</p>
 
           <ul class="launcher-card__features">
-            ${card.features.map((feature) => `<li>${feature}</li>`).join("")}
+            ${card.features.map((feature) => `<li>${feature}</li>`).join('')}
           </ul>
 
           <a class="launcher-card__link" href="${getAppUrl(card.appName)}">
@@ -189,7 +166,7 @@ function renderLauncher() {
         </article>
       `,
     )
-    .join("");
+    .join('')
 
   app.innerHTML = `
     <main class="launcher">
@@ -215,58 +192,32 @@ function renderLauncher() {
         ${cards}
       </section>
     </main>
-  `;
-}
-
-function getVisibleProducts() {
-  const normalizedQuery = posState.searchQuery.trim().toLowerCase();
-
-  return menuItems.filter((product) => {
-    const matchesCategory =
-      posState.selectedCategoryId === "all" ||
-      product.categoryId === posState.selectedCategoryId;
-
-    const matchesPopular = !posState.showPopularOnly || product.isPopular;
-
-    const searchableText = [
-      product.name,
-      product.description,
-      getCategoryById(product.categoryId)?.name ?? "",
-      ...product.variants.map((variant) => variant.name),
-    ]
-      .join(" ")
-      .toLowerCase();
-
-    const matchesSearch =
-      normalizedQuery === "" || searchableText.includes(normalizedQuery);
-
-    return matchesCategory && matchesPopular && matchesSearch;
-  });
+  `
 }
 
 function renderPosCategories() {
   const allCategoryButton = `
     <button
       class="category-filter ${
-        posState.selectedCategoryId === "all" && !posState.showPopularOnly
-          ? "category-filter--active"
-          : ""
+        posState.selectedCategoryId === 'all' && !posState.showPopularOnly
+          ? 'category-filter--active'
+          : ''
       }"
       type="button"
       data-category-id="all"
       aria-pressed="${
-        posState.selectedCategoryId === "all" && !posState.showPopularOnly
+        posState.selectedCategoryId === 'all' && !posState.showPopularOnly
       }"
     >
       <span class="category-filter__icon" aria-hidden="true"></span>
       All Items
     </button>
-  `;
+  `
 
   const popularButton = `
     <button
       class="category-filter ${
-        posState.showPopularOnly ? "category-filter--active" : ""
+        posState.showPopularOnly ? 'category-filter--active' : ''
       }"
       type="button"
       data-popular-filter="true"
@@ -275,18 +226,18 @@ function renderPosCategories() {
       <span class="category-filter__icon" aria-hidden="true"></span>
       Popular
     </button>
-  `;
+  `
 
   const categoryButtons = categories
-    .filter((category) => category.id !== "all")
+    .filter((category) => category.id !== 'all')
     .map(
       (category) => `
         <button
           class="category-filter ${
             posState.selectedCategoryId === category.id &&
             !posState.showPopularOnly
-              ? "category-filter--active"
-              : ""
+              ? 'category-filter--active'
+              : ''
           }"
           type="button"
           data-category-id="${category.id}"
@@ -300,24 +251,24 @@ function renderPosCategories() {
         </button>
       `,
     )
-    .join("");
+    .join('')
 
-  return `${allCategoryButton}${popularButton}${categoryButtons}`;
+  return `${allCategoryButton}${popularButton}${categoryButtons}`
 }
 
 function renderProducts() {
-  const visibleProducts = getVisibleProducts();
+  const visibleProducts = getVisibleProducts()
 
   if (visibleProducts.length === 0) {
-    return renderNoProductsState();
+    return renderNoProductsState()
   }
 
-  return visibleProducts.map((product) => renderProductCard(product)).join("");
+  return visibleProducts.map((product) => renderProductCard(product)).join('')
 }
 
 function renderCartItem(cartItem) {
-  const modifierNames = cartItem.modifiers.map((modifier) => modifier.name);
-  const details = [cartItem.variantName, ...modifierNames].join(" · ");
+  const modifierNames = cartItem.modifiers.map((modifier) => modifier.name)
+  const details = [cartItem.variantName, ...modifierNames].join(' · ')
 
   return `
     <article class="cart-item">
@@ -370,15 +321,15 @@ function renderCartItem(cartItem) {
         </div>
       </div>
     </article>
-  `;
+  `
 }
 
 function renderAdjustments(totals, hasItems) {
   const discountSummary = posState.isDiscountEnabled
-    ? posState.discountType === "percentage"
+    ? posState.discountType === 'percentage'
       ? `${posState.discountValue || 0}% selected`
       : `${formatShortGhs(Number(posState.discountValue) || 0)} selected`
-    : "Not applied";
+    : 'Not applied'
 
   return `
     <section class="order-panel__adjustments" aria-label="Order adjustments">
@@ -392,7 +343,7 @@ function renderAdjustments(totals, hasItems) {
             data-toggle-tax
             aria-label="Toggle tax"
             aria-pressed="${posState.isTaxEnabled}"
-            ${hasItems ? "" : "disabled"}
+            ${hasItems ? '' : 'disabled'}
           ></button>
         </div>
 
@@ -400,7 +351,7 @@ function renderAdjustments(totals, hasItems) {
           ${
             posState.isTaxEnabled
               ? `${(DEMO_TAX_RATE * 100).toFixed(0)}% tax is applied`
-              : "Tax is not applied"
+              : 'Tax is not applied'
           }
         </span>
       </section>
@@ -415,26 +366,28 @@ function renderAdjustments(totals, hasItems) {
             data-toggle-discount
             aria-label="Toggle discount"
             aria-pressed="${posState.isDiscountEnabled}"
-            ${hasItems ? "" : "disabled"}
+            ${hasItems ? '' : 'disabled'}
           ></button>
         </div>
 
-        <span class="order-adjustment__value">${discountSummary}</span>
+        <span class="order-adjustment__value" data-discount-summary>
+          ${discountSummary}
+        </span>
 
         <div class="order-adjustment__controls">
           <select
             class="adjustment-select"
             data-discount-type
             aria-label="Discount type"
-            ${posState.isDiscountEnabled && hasItems ? "" : "disabled"}
+            ${posState.isDiscountEnabled && hasItems ? '' : 'disabled'}
           >
             <option value="percentage" ${
-              posState.discountType === "percentage" ? "selected" : ""
+              posState.discountType === 'percentage' ? 'selected' : ''
             }>
               Percentage
             </option>
             <option value="fixed" ${
-              posState.discountType === "fixed" ? "selected" : ""
+              posState.discountType === 'fixed' ? 'selected' : ''
             }>
               Fixed amount
             </option>
@@ -442,48 +395,48 @@ function renderAdjustments(totals, hasItems) {
 
           <input
             class="adjustment-input"
-            data-field-name="discount-value"
             type="number"
             inputmode="decimal"
             min="0"
             max="${
-              posState.discountType === "percentage" ? "100" : totals.subtotal
+              posState.discountType === 'percentage' ? '100' : totals.subtotal
             }"
             step="0.01"
             placeholder="${
-              posState.discountType === "percentage" ? "0–100" : "Amount"
+              posState.discountType === 'percentage' ? '0–100' : 'Amount'
             }"
             value="${escapeHtml(posState.discountValue)}"
             data-discount-value
             aria-label="Discount value"
-            ${posState.isDiscountEnabled && hasItems ? "" : "disabled"}
+            ${posState.isDiscountEnabled && hasItems ? '' : 'disabled'}
           />
         </div>
 
-        ${
-          posState.discountType === "percentage"
-            ? '<p class="order-adjustment__hint">Enter a discount from 0% to 100%.</p>'
-            : `<p class="order-adjustment__hint">Maximum discount: ${formatShortGhs(
-                totals.subtotal,
-              )}</p>`
-        }
+        <p class="order-adjustment__hint" data-discount-hint>
+          ${
+            posState.discountType === 'percentage'
+              ? 'Enter a discount from 0% to 100%.'
+              : `Maximum discount: ${formatShortGhs(totals.subtotal)}`
+          }
+        </p>
 
-        ${
-          posState.discountError
-            ? `<p class="order-adjustment__error" role="alert">${escapeHtml(
-                posState.discountError,
-              )}</p>`
-            : ""
-        }
+        <p
+          class="order-adjustment__error"
+          data-discount-error
+          role="alert"
+          ${posState.discountError ? '' : 'hidden'}
+        >
+          ${escapeHtml(posState.discountError)}
+        </p>
       </section>
     </section>
-  `;
+  `
 }
 
 function renderOrderPanel() {
-  const totals = getOrderTotals();
-  const cartQuantity = getCartQuantity(posState.cartItems);
-  const hasItems = posState.cartItems.length > 0;
+  const totals = getOrderTotals()
+  const cartQuantity = getCartQuantity(posState.cartItems)
+  const hasItems = posState.cartItems.length > 0
 
   return `
     <aside class="pos-order-panel" aria-labelledby="order-panel-title">
@@ -498,7 +451,7 @@ function renderOrderPanel() {
           type="button"
           data-clear-order
           aria-label="Clear current order"
-          ${hasItems ? "" : "disabled"}
+          ${hasItems ? '' : 'disabled'}
         >
           ×
         </button>
@@ -509,14 +462,14 @@ function renderOrderPanel() {
           ? `
             <section
               class="order-panel__items"
-              aria-label="${cartQuantity} item${cartQuantity === 1 ? "" : "s"} in current order"
+              aria-label="${cartQuantity} item${cartQuantity === 1 ? '' : 's'} in current order"
             >
-              ${posState.cartItems.map((cartItem) => renderCartItem(cartItem)).join("")}
+              ${posState.cartItems.map((cartItem) => renderCartItem(cartItem)).join('')}
             </section>
           `
           : `
             <section class="order-panel__empty" aria-label="Empty order">
-              <div>
+              <div class="order-panel__empty-content">
                 <div class="order-panel__empty-icon" aria-hidden="true"></div>
                 <p class="order-panel__empty-title">Your order is empty</p>
                 <p class="order-panel__empty-copy">
@@ -533,50 +486,75 @@ function renderOrderPanel() {
         <div class="order-panel__summary">
           <div class="order-summary-row">
             <span>Subtotal</span>
-            <span class="order-summary-row__value">
+            <span class="order-summary-row__value" data-subtotal-value>
               ${formatShortGhs(totals.subtotal)}
             </span>
           </div>
 
-          ${
-            totals.discountAmount > 0
-              ? `
-                <div class="order-summary-row">
-                  <span>Discount</span>
-                  <span class="order-summary-row__value">
-                    − ${formatShortGhs(totals.discountAmount)}
-                  </span>
-                </div>
-              `
-              : ""
-          }
+          <div
+            class="order-summary-row"
+            data-discount-row
+            ${totals.discountAmount > 0 ? '' : 'hidden'}
+          >
+            <span>Discount</span>
+            <span class="order-summary-row__value" data-discount-total>
+              − ${formatShortGhs(totals.discountAmount)}
+            </span>
+          </div>
 
           <div class="order-summary-row">
             <span>Tax</span>
-            <span class="order-summary-row__value">
+            <span class="order-summary-row__value" data-tax-total>
               ${formatShortGhs(totals.taxAmount)}
             </span>
           </div>
 
           <div class="order-summary-row order-summary-row--total">
             <span>Total</span>
-            <span class="order-summary-row__value">
+            <span class="order-summary-row__value" data-order-total>
               ${formatShortGhs(totals.total)}
             </span>
           </div>
         </div>
 
         <button
-  class="order-panel__action"
-  type="button"
-  data-open-payment
-  ${hasItems ? '' : 'disabled'}
->
-  Continue to payment
-</button>
+          class="order-panel__action"
+          type="button"
+          data-open-payment
+          ${hasItems ? '' : 'disabled'}
+        >
+          Continue to payment
+        </button>
       </footer>
     </aside>
-  `;
+  `
+}
+
+function getProductModifierGroups(product) {
+  return product.modifierGroupIds
+    .map((modifierGroupId) =>
+      modifierGroups.find((group) => group.id === modifierGroupId),
+    )
+    .filter(Boolean)
+}
+
+function renderActiveCustomizationDialog() {
+  if (!posState.activeProductId) {
+    return ''
+  }
+
+  const product = menuItems.find(
+    (menuItem) => menuItem.id === posState.activeProductId,
+  )
+
+  if (!product) {
+    return ''
+  }
+
+  return renderItemCustomizationDialog(
+    product,
+    getProductModifierGroups(product),
+  )
 }
 
 function renderOrderConfirmation() {
@@ -602,36 +580,8 @@ function renderOrderConfirmation() {
   `
 }
 
-function getProductModifierGroups(product) {
-  return product.modifierGroupIds
-    .map((modifierGroupId) =>
-      modifierGroups.find((group) => group.id === modifierGroupId),
-    )
-    .filter(Boolean);
-}
-
-function renderActiveCustomizationDialog() {
-  if (!posState.activeProductId) {
-    return "";
-  }
-
-  const product = menuItems.find(
-    (menuItem) => menuItem.id === posState.activeProductId,
-  );
-
-  if (!product) {
-    return "";
-  }
-
-  return renderItemCustomizationDialog(
-    product,
-    getProductModifierGroups(product),
-  );
-}
-
-function renderPos({ preserveFocus = false } = {}) {
-  const focusState = preserveFocus ? captureFocusedInput() : null;
-  const visibleProductCount = getVisibleProducts().length;
+function renderPos() {
+  const visibleProductCount = getVisibleProducts().length
 
   app.innerHTML = `
     <main class="pos-layout">
@@ -651,10 +601,10 @@ function renderPos({ preserveFocus = false } = {}) {
               (item) => `
                 <button
                   class="pos-nav-item ${
-                    item.isActive ? "pos-nav-item--active" : ""
+                    item.isActive ? 'pos-nav-item--active' : ''
                   }"
                   type="button"
-                  aria-current="${item.isActive ? "page" : "false"}"
+                  aria-current="${item.isActive ? 'page' : 'false'}"
                 >
                   <span class="pos-nav-item__icon" aria-hidden="true">
                     ${item.icon}
@@ -663,7 +613,7 @@ function renderPos({ preserveFocus = false } = {}) {
                 </button>
               `,
             )
-            .join("")}
+            .join('')}
         </nav>
 
         <div class="pos-sidebar__footer">
@@ -672,7 +622,7 @@ function renderPos({ preserveFocus = false } = {}) {
             <p class="pos-sidebar__device-name">Counter Tablet 1</p>
           </section>
 
-          <a class="pos-sidebar__back-link" href="${getAppUrl("launcher")}">
+          <a class="pos-sidebar__back-link" href="${getAppUrl('launcher')}">
             <span aria-hidden="true">←</span>
             <span>System launcher</span>
           </a>
@@ -701,26 +651,26 @@ function renderPos({ preserveFocus = false } = {}) {
         <div class="pos-order-options" aria-label="Order type">
           <button
             class="order-type-button ${
-              posState.orderType === "dine-in"
-                ? "order-type-button--active"
-                : ""
+              posState.orderType === 'dine-in'
+                ? 'order-type-button--active'
+                : ''
             }"
             type="button"
             data-order-type="dine-in"
-            aria-pressed="${posState.orderType === "dine-in"}"
+            aria-pressed="${posState.orderType === 'dine-in'}"
           >
             Dine-in
           </button>
 
           <button
             class="order-type-button ${
-              posState.orderType === "takeaway"
-                ? "order-type-button--active"
-                : ""
+              posState.orderType === 'takeaway'
+                ? 'order-type-button--active'
+                : ''
             }"
             type="button"
             data-order-type="takeaway"
-            aria-pressed="${posState.orderType === "takeaway"}"
+            aria-pressed="${posState.orderType === 'takeaway'}"
           >
             Takeaway
           </button>
@@ -732,9 +682,9 @@ function renderPos({ preserveFocus = false } = {}) {
           <div class="pos-menu-toolbar">
             <div>
               <h2 class="pos-menu-toolbar__title" id="menu-title">Menu</h2>
-              <p class="pos-menu-toolbar__meta">
+              <p class="pos-menu-toolbar__meta" data-product-count>
                 ${visibleProductCount} item${
-                  visibleProductCount === 1 ? "" : "s"
+                  visibleProductCount === 1 ? '' : 's'
                 } available
               </p>
             </div>
@@ -743,11 +693,13 @@ function renderPos({ preserveFocus = false } = {}) {
               <span class="pos-search__icon" aria-hidden="true"></span>
               <input
                 class="pos-search__input"
-                data-field-name="menu-search"
                 type="search"
                 placeholder="Search menu"
                 aria-label="Search Luna menu"
                 value="${escapeHtml(posState.searchQuery)}"
+                autocomplete="off"
+                autocapitalize="none"
+                spellcheck="false"
               />
             </label>
           </div>
@@ -775,135 +727,286 @@ function renderPos({ preserveFocus = false } = {}) {
             cashReceived: posState.cashReceived,
             error: posState.paymentError,
           })
-        : ""
+        : ''
     }
 
     ${renderOrderConfirmation()}
-  `;
+  `
 
-  attachPosEventListeners();
+  attachPosEventListeners()
 
   if (posState.activeProductId) {
-    const dialog = document.querySelector(".customization-dialog");
+    const dialog = document.querySelector('.customization-dialog')
 
     if (dialog && !dialog.open) {
-      dialog.showModal();
+      dialog.showModal()
     }
   }
 
   if (posState.isPaymentDialogOpen) {
-    const paymentDialog = document.querySelector(".payment-dialog");
+    const paymentDialog = document.querySelector('.payment-dialog')
 
     if (paymentDialog && !paymentDialog.open) {
-      paymentDialog.showModal();
+      paymentDialog.showModal()
     }
   }
+}
 
-  restoreFocusedInput(focusState);
+function updateProductsArea() {
+  const productsGrid = document.querySelector('.pos-products-grid')
+  const productCount = document.querySelector('[data-product-count]')
+
+  if (!productsGrid || !productCount) {
+    renderPos()
+    return
+  }
+
+  const visibleProducts = getVisibleProducts()
+
+  productsGrid.innerHTML =
+    visibleProducts.length === 0
+      ? renderNoProductsState()
+      : visibleProducts.map((product) => renderProductCard(product)).join('')
+
+  productCount.textContent = `${visibleProducts.length} item${
+    visibleProducts.length === 1 ? '' : 's'
+  } available`
+
+  attachProductImageFallbacks()
+  attachProductCardListeners()
+}
+
+function updateFinancialDisplay() {
+  const totals = getOrderTotals()
+  const subtotalValue = document.querySelector('[data-subtotal-value]')
+  const discountRow = document.querySelector('[data-discount-row]')
+  const discountTotal = document.querySelector('[data-discount-total]')
+  const taxTotal = document.querySelector('[data-tax-total]')
+  const orderTotal = document.querySelector('[data-order-total]')
+  const discountSummary = document.querySelector('[data-discount-summary]')
+  const discountHint = document.querySelector('[data-discount-hint]')
+  const discountError = document.querySelector('[data-discount-error]')
+  const discountInput = document.querySelector('[data-discount-value]')
+
+  if (
+    !subtotalValue ||
+    !discountRow ||
+    !discountTotal ||
+    !taxTotal ||
+    !orderTotal ||
+    !discountSummary ||
+    !discountHint ||
+    !discountError ||
+    !discountInput
+  ) {
+    renderPos()
+    return
+  }
+
+  subtotalValue.textContent = formatShortGhs(totals.subtotal)
+  taxTotal.textContent = formatShortGhs(totals.taxAmount)
+  orderTotal.textContent = formatShortGhs(totals.total)
+
+  if (totals.discountAmount > 0) {
+    discountRow.hidden = false
+    discountTotal.textContent = `− ${formatShortGhs(totals.discountAmount)}`
+  } else {
+    discountRow.hidden = true
+  }
+
+  discountSummary.textContent = posState.isDiscountEnabled
+    ? posState.discountType === 'percentage'
+      ? `${posState.discountValue || 0}% selected`
+      : `${formatShortGhs(Number(posState.discountValue) || 0)} selected`
+    : 'Not applied'
+
+  discountHint.textContent =
+    posState.discountType === 'percentage'
+      ? 'Enter a discount from 0% to 100%.'
+      : `Maximum discount: ${formatShortGhs(totals.subtotal)}`
+
+  discountInput.max =
+    posState.discountType === 'percentage' ? '100' : String(totals.subtotal)
+
+  if (posState.discountError) {
+    discountError.hidden = false
+    discountError.textContent = posState.discountError
+  } else {
+    discountError.hidden = true
+    discountError.textContent = ''
+  }
+}
+
+function updateCashPaymentDisplay() {
+  const paymentDialog = document.querySelector('.payment-dialog')
+
+  if (!paymentDialog || posState.paymentMethod !== 'cash') {
+    return
+  }
+
+  const total = getOrderTotals().total
+  const cashValue = Number(posState.cashReceived)
+  const validCashAmount = Number.isFinite(cashValue) && cashValue >= 0
+  const change = validCashAmount ? Math.max(cashValue - total, 0) : 0
+  const balance = validCashAmount ? Math.max(total - cashValue, 0) : total
+
+  const balanceValue = paymentDialog.querySelector('[data-payment-balance]')
+  const changeValue = paymentDialog.querySelector('[data-payment-change]')
+  const paymentError = paymentDialog.querySelector('[data-payment-error]')
+
+  if (balanceValue) {
+    balanceValue.textContent = formatShortGhs(balance)
+  }
+
+  if (changeValue) {
+    changeValue.textContent = formatShortGhs(change)
+  }
+
+  if (paymentError) {
+    if (posState.paymentError) {
+      paymentError.hidden = false
+      paymentError.textContent = posState.paymentError
+    } else {
+      paymentError.hidden = true
+      paymentError.textContent = ''
+    }
+  }
+}
+
+function attachProductImageFallbacks() {
+  document.querySelectorAll('.product-card__image').forEach((image) => {
+    image.addEventListener(
+      'error',
+      () => {
+        handleProductImageError(image, image.dataset.fallbackImage)
+      },
+      { once: true },
+    )
+  })
+}
+
+function attachCartImageFallbacks() {
+  document.querySelectorAll('.cart-item__image').forEach((image) => {
+    image.addEventListener(
+      'error',
+      () => {
+        handleProductImageError(image, image.dataset.fallbackImage)
+      },
+      { once: true },
+    )
+  })
+}
+
+function attachProductCardListeners() {
+  document.querySelectorAll('[data-product-id]').forEach((button) => {
+    button.addEventListener('click', () => {
+      openProductCustomization(button.dataset.productId)
+    })
+  })
 }
 
 function openProductCustomization(productId) {
-  const product = menuItems.find((menuItem) => menuItem.id === productId);
+  const product = menuItems.find((menuItem) => menuItem.id === productId)
 
   if (!product || !product.isAvailable) {
-    return;
+    return
   }
 
-  const hasMultipleVariants = product.variants.length > 1;
-  const hasModifiers = getProductModifierGroups(product).length > 0;
+  const hasMultipleVariants = product.variants.length > 1
+  const hasModifiers = getProductModifierGroups(product).length > 0
 
   if (!hasMultipleVariants && !hasModifiers) {
     const cartItem = createCartItem({
       product,
       variant: product.variants[0],
-    });
+    })
 
-    posState.cartItems = addCartItem(posState.cartItems, cartItem);
-    renderPos();
-    return;
+    posState.cartItems = addCartItem(posState.cartItems, cartItem)
+    renderPos()
+    return
   }
 
-  posState.activeProductId = product.id;
-  renderPos();
+  posState.activeProductId = product.id
+  renderPos()
 }
 
 function closeProductCustomization() {
-  posState.activeProductId = null;
-  renderPos();
+  posState.activeProductId = null
+  renderPos()
 }
 
 function addCustomizedProductToCart() {
-  const dialog = document.querySelector(".customization-dialog");
+  const dialog = document.querySelector('.customization-dialog')
   const product = menuItems.find(
     (menuItem) => menuItem.id === posState.activeProductId,
-  );
+  )
 
   if (!dialog || !product) {
-    closeProductCustomization();
-    return;
+    closeProductCustomization()
+    return
   }
 
-  const formData = new FormData(dialog.querySelector("form"));
-  const variantId = formData.get("variant") || product.variants[0].id;
+  const formData = new FormData(dialog.querySelector('form'))
+  const variantId = formData.get('variant') || product.variants[0].id
 
   const selectedVariant = product.variants.find(
     (variant) => variant.id === variantId,
-  );
+  )
 
   const selectedModifiers = getProductModifierGroups(product).flatMap(
     (group) => {
       const optionIds =
-        group.selectionType === "multiple"
+        group.selectionType === 'multiple'
           ? formData.getAll(`modifier-${group.id}`)
-          : [formData.get(`modifier-${group.id}`)].filter(Boolean);
+          : [formData.get(`modifier-${group.id}`)].filter(Boolean)
 
       return optionIds
         .map((optionId) =>
           group.options.find((option) => option.id === optionId),
         )
-        .filter(Boolean);
+        .filter(Boolean)
     },
-  );
+  )
 
   const cartItem = createCartItem({
     product,
     variant: selectedVariant,
     modifiers: selectedModifiers,
-  });
+  })
 
-  posState.cartItems = addCartItem(posState.cartItems, cartItem);
-  posState.activeProductId = null;
-  renderPos();
+  posState.cartItems = addCartItem(posState.cartItems, cartItem)
+  posState.activeProductId = null
+  renderPos()
 }
 
 function validateDiscountValue(value) {
-  if (!posState.isDiscountEnabled || value === "") {
-    return "";
+  if (!posState.isDiscountEnabled || value === '') {
+    return ''
   }
 
-  const numericValue = Number(value);
+  const numericValue = Number(value)
 
   if (!Number.isFinite(numericValue) || numericValue < 0) {
-    return "Enter a valid discount value.";
+    return 'Enter a valid discount value.'
   }
 
-  if (posState.discountType === "percentage" && numericValue > 100) {
-    return "Percentage discount cannot be more than 100%.";
+  if (posState.discountType === 'percentage' && numericValue > 100) {
+    return 'Percentage discount cannot be more than 100%.'
   }
 
-  const subtotal = getCartSubtotal(posState.cartItems);
+  const subtotal = getCartSubtotal(posState.cartItems)
 
-  if (posState.discountType === "fixed" && numericValue > subtotal) {
-    return `Fixed discount cannot exceed ${formatShortGhs(subtotal)}.`;
+  if (posState.discountType === 'fixed' && numericValue > subtotal) {
+    return `Fixed discount cannot exceed ${formatShortGhs(subtotal)}.`
   }
 
-  return "";
+  return ''
 }
 
 function updateDiscountValue(value) {
-  posState.discountValue = value;
-  posState.discountError = validateDiscountValue(value);
-  renderPos({ preserveFocus: true });
+  posState.discountValue = value
+  posState.discountError = validateDiscountValue(value)
+  updateFinancialDisplay()
 }
 
 function getPaymentMethodLabel(paymentMethod) {
@@ -959,12 +1062,13 @@ function completeCurrentOrder() {
 
   if (paymentError) {
     posState.paymentError = paymentError
-    renderPos({ preserveFocus: true })
+    updateCashPaymentDisplay()
     return
   }
 
   const totals = getOrderTotals()
   const completedAt = new Date()
+  const itemCount = getCartQuantity(posState.cartItems)
 
   posState.lastCompletedOrder = {
     id: crypto.randomUUID(),
@@ -986,6 +1090,7 @@ function completeCurrentOrder() {
         : 0,
     status: 'PAID',
     completedAt: completedAt.toISOString(),
+    itemCount,
   }
 
   posState.cartItems = []
@@ -1008,146 +1113,134 @@ function startNewOrder() {
 }
 
 function attachPosEventListeners() {
-  const searchInput = document.querySelector(".pos-search__input");
+  const searchInput = document.querySelector('.pos-search__input')
 
-  searchInput?.addEventListener("input", (event) => {
-    posState.searchQuery = event.target.value;
-    renderPos({ preserveFocus: true });
-  });
+  searchInput?.addEventListener('input', (event) => {
+    posState.searchQuery = event.target.value
+    updateProductsArea()
+  })
 
-  document.querySelectorAll("[data-category-id]").forEach((button) => {
-    button.addEventListener("click", () => {
-      posState.selectedCategoryId = button.dataset.categoryId;
-      posState.showPopularOnly = false;
-      renderPos();
-    });
-  });
+  document.querySelectorAll('[data-category-id]').forEach((button) => {
+    button.addEventListener('click', () => {
+      posState.selectedCategoryId = button.dataset.categoryId
+      posState.showPopularOnly = false
+      renderPos()
+    })
+  })
 
-  document.querySelectorAll("[data-popular-filter]").forEach((button) => {
-    button.addEventListener("click", () => {
-      posState.showPopularOnly = !posState.showPopularOnly;
-      posState.selectedCategoryId = "all";
-      renderPos();
-    });
-  });
+  document.querySelectorAll('[data-popular-filter]').forEach((button) => {
+    button.addEventListener('click', () => {
+      posState.showPopularOnly = !posState.showPopularOnly
+      posState.selectedCategoryId = 'all'
+      renderPos()
+    })
+  })
 
-  document.querySelectorAll("[data-order-type]").forEach((button) => {
-    button.addEventListener("click", () => {
-      posState.orderType = button.dataset.orderType;
-      renderPos();
-    });
-  });
+  document.querySelectorAll('[data-order-type]').forEach((button) => {
+    button.addEventListener('click', () => {
+      posState.orderType = button.dataset.orderType
+      renderPos()
+    })
+  })
 
-  document.querySelectorAll("[data-product-id]").forEach((button) => {
-    button.addEventListener("click", () => {
-      openProductCustomization(button.dataset.productId);
-    });
-  });
+  attachProductCardListeners()
+  attachProductImageFallbacks()
+  attachCartImageFallbacks()
 
-  document.querySelectorAll("[data-increase-cart-item]").forEach((button) => {
-    button.addEventListener("click", () => {
-      const cartItemId = button.dataset.increaseCartItem;
+  document.querySelectorAll('[data-increase-cart-item]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const cartItemId = button.dataset.increaseCartItem
       const cartItem = posState.cartItems.find(
         (item) => item.id === cartItemId,
-      );
+      )
 
       if (!cartItem) {
-        return;
+        return
       }
 
       posState.cartItems = updateCartItemQuantity(
         posState.cartItems,
         cartItemId,
         cartItem.quantity + 1,
-      );
+      )
 
-      posState.discountError = validateDiscountValue(posState.discountValue);
-      renderPos();
-    });
-  });
+      posState.discountError = validateDiscountValue(posState.discountValue)
+      renderPos()
+    })
+  })
 
-  document.querySelectorAll("[data-decrease-cart-item]").forEach((button) => {
-    button.addEventListener("click", () => {
-      const cartItemId = button.dataset.decreaseCartItem;
+  document.querySelectorAll('[data-decrease-cart-item]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const cartItemId = button.dataset.decreaseCartItem
       const cartItem = posState.cartItems.find(
         (item) => item.id === cartItemId,
-      );
+      )
 
       if (!cartItem) {
-        return;
+        return
       }
 
       posState.cartItems = updateCartItemQuantity(
         posState.cartItems,
         cartItemId,
         cartItem.quantity - 1,
-      );
+      )
 
-      posState.discountError = validateDiscountValue(posState.discountValue);
-      renderPos();
-    });
-  });
+      posState.discountError = validateDiscountValue(posState.discountValue)
+      renderPos()
+    })
+  })
 
-  document
-    .querySelector("[data-clear-order]")
-    ?.addEventListener("click", () => {
-      posState.cartItems = [];
-      posState.isTaxEnabled = false;
-      posState.isDiscountEnabled = false;
-      posState.discountValue = "";
-      posState.discountError = "";
-      renderPos();
-    });
+  document.querySelector('[data-clear-order]')?.addEventListener('click', () => {
+    posState.cartItems = []
+    posState.isTaxEnabled = false
+    posState.isDiscountEnabled = false
+    posState.discountValue = ''
+    posState.discountError = ''
+    renderPos()
+  })
 
-  document.querySelector("[data-toggle-tax]")?.addEventListener("click", () => {
-    posState.isTaxEnabled = !posState.isTaxEnabled;
-    renderPos();
-  });
+  document.querySelector('[data-toggle-tax]')?.addEventListener('click', () => {
+    posState.isTaxEnabled = !posState.isTaxEnabled
+    renderPos()
+  })
 
   document
-    .querySelector("[data-toggle-discount]")
-    ?.addEventListener("click", () => {
-      posState.isDiscountEnabled = !posState.isDiscountEnabled;
-      posState.discountError = validateDiscountValue(posState.discountValue);
-      renderPos();
-    });
+    .querySelector('[data-toggle-discount]')
+    ?.addEventListener('click', () => {
+      posState.isDiscountEnabled = !posState.isDiscountEnabled
+      posState.discountError = validateDiscountValue(posState.discountValue)
+      renderPos()
+    })
 
   document
-    .querySelector("[data-discount-type]")
-    ?.addEventListener("change", (event) => {
-      posState.discountType = event.target.value;
-      posState.discountError = validateDiscountValue(posState.discountValue);
-      renderPos();
-    });
+    .querySelector('[data-discount-type]')
+    ?.addEventListener('change', (event) => {
+      posState.discountType = event.target.value
+      posState.discountError = validateDiscountValue(posState.discountValue)
+      renderPos()
+    })
 
   document
-    .querySelector("[data-discount-value]")
-    ?.addEventListener("input", (event) => {
-      updateDiscountValue(event.target.value);
-    });
+    .querySelector('[data-discount-value]')
+    ?.addEventListener('input', (event) => {
+      updateDiscountValue(event.target.value)
+    })
 
-  document.querySelectorAll("[data-close-customization]").forEach((button) => {
-    button.addEventListener("click", () => {
-      closeProductCustomization();
-    });
-  });
-
-  document
-    .querySelector("[data-add-customized-item]")
-    ?.addEventListener("click", (event) => {
-      event.preventDefault();
-      addCustomizedProductToCart();
-    });
+  document.querySelectorAll('[data-close-customization]').forEach((button) => {
+    button.addEventListener('click', () => {
+      closeProductCustomization()
+    })
+  })
 
   document
-    .querySelectorAll(".product-card__image, .cart-item__image")
-    .forEach((image) => {
-      image.addEventListener("error", () => {
-        handleProductImageError(image, image.dataset.fallbackImage);
-      });
-    });
+    .querySelector('[data-add-customized-item]')
+    ?.addEventListener('click', (event) => {
+      event.preventDefault()
+      addCustomizedProductToCart()
+    })
 
-      document.querySelector('[data-open-payment]')?.addEventListener('click', () => {
+  document.querySelector('[data-open-payment]')?.addEventListener('click', () => {
     openPaymentDialog()
   })
 
@@ -1165,39 +1258,45 @@ function attachPosEventListeners() {
     })
   })
 
-  document.querySelector('[data-cash-received]')?.addEventListener('input', (event) => {
-    posState.cashReceived = event.target.value
-    posState.paymentError = ''
-    renderPos({ preserveFocus: true })
-  })
+  document
+    .querySelector('[data-cash-received]')
+    ?.addEventListener('input', (event) => {
+      posState.cashReceived = event.target.value
+      posState.paymentError = ''
+      updateCashPaymentDisplay()
+    })
 
-  document.querySelector('[data-confirm-payment]')?.addEventListener('click', (event) => {
-    event.preventDefault()
-    completeCurrentOrder()
-  })
+  document
+    .querySelector('[data-confirm-payment]')
+    ?.addEventListener('click', (event) => {
+      event.preventDefault()
+      completeCurrentOrder()
+    })
 
-  document.querySelector('[data-start-new-order]')?.addEventListener('click', () => {
-    startNewOrder()
-  })
+  document
+    .querySelector('[data-start-new-order]')
+    ?.addEventListener('click', () => {
+      startNewOrder()
+    })
 }
 
 function renderPlaceholder(appName) {
   const pageDetails = {
-    "customer-display": {
-      eyebrow: "Second tablet",
-      title: "Customer Display",
+    'customer-display': {
+      eyebrow: 'Second tablet',
+      title: 'Customer Display',
       description:
-        "Phase 4 will build a read-only live customer screen with order items, totals, payment prompts, and preparation status updates.",
+        'Phase 4 will build a read-only live customer screen with order items, totals, payment prompts, and preparation status updates.',
     },
-    "back-office": {
-      eyebrow: "Owner workspace",
-      title: "Back Office",
+    'back-office': {
+      eyebrow: 'Owner workspace',
+      title: 'Back Office',
       description:
-        "Phase 7 will build the owner dashboard, menu management, reports, settings, daily sales, costs, expenses, and profit overview.",
+        'Phase 7 will build the owner dashboard, menu management, reports, settings, daily sales, costs, expenses, and profit overview.',
     },
-  };
+  }
 
-  const page = pageDetails[appName];
+  const page = pageDetails[appName]
 
   app.innerHTML = `
     <main class="route-placeholder">
@@ -1212,28 +1311,28 @@ function renderPlaceholder(appName) {
           ${page.description}
         </p>
 
-        <a class="route-placeholder__back-link" href="${getAppUrl("launcher")}">
+        <a class="route-placeholder__back-link" href="${getAppUrl('launcher')}">
           ← Return to Luna system launcher
         </a>
       </section>
     </main>
-  `;
+  `
 }
 
 function renderApp() {
-  const currentApp = getCurrentApp();
+  const currentApp = getCurrentApp()
 
-  if (currentApp === "launcher") {
-    renderLauncher();
-    return;
+  if (currentApp === 'launcher') {
+    renderLauncher()
+    return
   }
 
-  if (currentApp === "pos") {
-    renderPos();
-    return;
+  if (currentApp === 'pos') {
+    renderPos()
+    return
   }
 
-  renderPlaceholder(currentApp);
+  renderPlaceholder(currentApp)
 }
 
-renderApp();
+renderApp()
