@@ -27,6 +27,7 @@ import {
   getAllOrders,
   getOrderCount,
   saveOrder,
+  updateOrder,
 } from './services/order-repository.js'
 
 const app = document.querySelector('#app')
@@ -110,6 +111,8 @@ const posState = {
   discountValue: '',
   discountError: '',
   isPaymentDialogOpen: false,
+  paymentMode: 'new-order',
+  paymentTargetOrderId: null,
   paymentMethod: 'cash',
   cashReceived: '',
   paymentError: '',
@@ -122,6 +125,8 @@ const posState = {
   ordersFilter: 'all',
   isLoadingOrders: false,
   ordersLoadError: '',
+  orderActionError: '',
+  isUpdatingOrder: false,
 }
 
 function escapeHtml(value) {
@@ -205,6 +210,28 @@ function getSelectedOrder() {
     posState.orders.find((order) => order.id === posState.selectedOrderId) ||
     null
   )
+}
+
+function getPaymentMethodLabel(paymentMethod) {
+  const labels = {
+    cash: 'Cash',
+    momo: 'Mobile Money',
+    card: 'Card',
+  }
+
+  return labels[paymentMethod] || 'Payment'
+}
+
+function getFulfilmentStatusLabel(fulfilmentStatus) {
+  const labels = {
+    PLACED: 'Placed',
+    PREPARING: 'Preparing',
+    READY: 'Ready',
+    COMPLETED: 'Completed',
+    CANCELLED: 'Cancelled',
+  }
+
+  return labels[fulfilmentStatus] || fulfilmentStatus
 }
 
 function renderLauncher() {
@@ -675,28 +702,6 @@ function renderActiveCustomizationDialog() {
   )
 }
 
-function getPaymentMethodLabel(paymentMethod) {
-  const labels = {
-    cash: 'Cash',
-    momo: 'Mobile Money',
-    card: 'Card',
-  }
-
-  return labels[paymentMethod] || 'Payment'
-}
-
-function getFulfilmentStatusLabel(fulfilmentStatus) {
-  const labels = {
-    PLACED: 'Placed',
-    PREPARING: 'Preparing',
-    READY: 'Ready',
-    COMPLETED: 'Completed',
-    CANCELLED: 'Cancelled',
-  }
-
-  return labels[fulfilmentStatus] || fulfilmentStatus
-}
-
 function renderOrderConfirmation() {
   if (!posState.lastSubmittedOrder) {
     return ''
@@ -747,7 +752,12 @@ function renderOrdersWorkspace() {
             Local mode
           </span>
 
-          <button class="pos-header__button" type="button" data-refresh-orders>
+          <button
+            class="pos-header__button"
+            type="button"
+            data-refresh-orders
+            ${posState.isLoadingOrders || posState.isUpdatingOrder ? 'disabled' : ''}
+          >
             Refresh
           </button>
         </div>
@@ -756,10 +766,10 @@ function renderOrdersWorkspace() {
       <div class="pos-divider"></div>
 
       ${
-        posState.ordersLoadError
+        posState.ordersLoadError || posState.orderActionError
           ? `
             <p class="order-save-error" role="alert">
-              ${escapeHtml(posState.ordersLoadError)}
+              ${escapeHtml(posState.ordersLoadError || posState.orderActionError)}
             </p>
           `
           : ''
@@ -796,6 +806,7 @@ function renderOrdersWorkspace() {
                       type="button"
                       data-orders-filter="${filter.id}"
                       aria-pressed="${posState.ordersFilter === filter.id}"
+                      ${posState.isUpdatingOrder ? 'disabled' : ''}
                     >
                       ${filter.label}
                     </button>
@@ -923,6 +934,45 @@ function renderNewOrderWorkspace() {
   `
 }
 
+function renderPaymentDialogForCurrentContext() {
+  if (!posState.isPaymentDialogOpen) {
+    return ''
+  }
+
+  const targetOrder =
+    posState.paymentMode === 'existing-order'
+      ? getSelectedOrder()
+      : null
+
+  const total =
+    posState.paymentMode === 'existing-order'
+      ? targetOrder?.total || 0
+      : getOrderTotals().total
+
+  return renderPaymentDialog({
+    total,
+    paymentMethod: posState.paymentMethod,
+    cashReceived: posState.cashReceived,
+    error: posState.paymentError,
+    eyebrow:
+      posState.paymentMode === 'existing-order'
+        ? 'Ready order handover'
+        : 'Complete order',
+    title:
+      posState.paymentMode === 'existing-order'
+        ? `Collect payment · ${targetOrder?.orderNumber || ''}`
+        : 'Payment',
+    description:
+      posState.paymentMode === 'existing-order'
+        ? 'Payment confirmation will also complete handover for this ready order.'
+        : '',
+    confirmLabel:
+      posState.paymentMode === 'existing-order'
+        ? 'Collect payment & complete'
+        : 'Confirm payment',
+  })
+}
+
 function renderPos() {
   const workspace =
     posState.activeView === 'orders'
@@ -969,16 +1019,7 @@ function renderPos() {
 
     ${renderActiveCustomizationDialog()}
 
-    ${
-      posState.isPaymentDialogOpen
-        ? renderPaymentDialog({
-            total: getOrderTotals().total,
-            paymentMethod: posState.paymentMethod,
-            cashReceived: posState.cashReceived,
-            error: posState.paymentError,
-          })
-        : ''
-    }
+    ${renderPaymentDialogForCurrentContext()}
 
     ${renderOrderConfirmation()}
   `
@@ -1094,7 +1135,16 @@ function updateCashPaymentDisplay() {
     return
   }
 
-  const total = getOrderTotals().total
+  const targetOrder =
+    posState.paymentMode === 'existing-order'
+      ? getSelectedOrder()
+      : null
+
+  const total =
+    posState.paymentMode === 'existing-order'
+      ? targetOrder?.total || 0
+      : getOrderTotals().total
+
   const cashValue = Number(posState.cashReceived)
   const validCashAmount = Number.isFinite(cashValue) && cashValue >= 0
   const change = validCashAmount ? Math.max(cashValue - total, 0) : 0
@@ -1322,6 +1372,8 @@ function resetDraftOrder() {
   posState.discountValue = ''
   posState.discountError = ''
   posState.isPaymentDialogOpen = false
+  posState.paymentMode = 'new-order'
+  posState.paymentTargetOrderId = null
   posState.paymentMethod = 'cash'
   posState.cashReceived = ''
   posState.paymentError = ''
@@ -1366,6 +1418,29 @@ function openPaymentDialog() {
   }
 
   posState.isPaymentDialogOpen = true
+  posState.paymentMode = 'new-order'
+  posState.paymentTargetOrderId = null
+  posState.paymentMethod = 'cash'
+  posState.cashReceived = ''
+  posState.paymentError = ''
+  renderPos()
+}
+
+function openExistingOrderPayment(orderId) {
+  const order = posState.orders.find((item) => item.id === orderId)
+
+  if (
+    !order ||
+    order.paymentStatus !== 'UNPAID' ||
+    order.fulfilmentStatus !== 'READY' ||
+    posState.isUpdatingOrder
+  ) {
+    return
+  }
+
+  posState.isPaymentDialogOpen = true
+  posState.paymentMode = 'existing-order'
+  posState.paymentTargetOrderId = order.id
   posState.paymentMethod = 'cash'
   posState.cashReceived = ''
   posState.paymentError = ''
@@ -1373,17 +1448,31 @@ function openPaymentDialog() {
 }
 
 function closePaymentDialog() {
-  if (posState.isSavingOrder) {
+  if (posState.isSavingOrder || posState.isUpdatingOrder) {
     return
   }
 
   posState.isPaymentDialogOpen = false
+  posState.paymentMode = 'new-order'
+  posState.paymentTargetOrderId = null
   posState.paymentError = ''
   renderPos()
 }
 
+function getPaymentTotal() {
+  if (posState.paymentMode === 'existing-order') {
+    const targetOrder = posState.orders.find(
+      (order) => order.id === posState.paymentTargetOrderId,
+    )
+
+    return targetOrder?.total || 0
+  }
+
+  return getOrderTotals().total
+}
+
 function validatePayment() {
-  const total = getOrderTotals().total
+  const total = getPaymentTotal()
 
   if (posState.paymentMethod !== 'cash') {
     return ''
@@ -1403,7 +1492,7 @@ function validatePayment() {
 }
 
 async function completeCurrentPayment() {
-  if (posState.isSavingOrder) {
+  if (posState.isSavingOrder || posState.isUpdatingOrder) {
     return
   }
 
@@ -1412,6 +1501,11 @@ async function completeCurrentPayment() {
   if (paymentError) {
     posState.paymentError = paymentError
     updateCashPaymentDisplay()
+    return
+  }
+
+  if (posState.paymentMode === 'existing-order') {
+    await collectPaymentAndCompleteExistingOrder()
     return
   }
 
@@ -1425,6 +1519,122 @@ async function completeCurrentPayment() {
   })
 
   await persistSubmittedOrder(order)
+}
+
+async function updateExistingOrder(updatedOrder) {
+  posState.isUpdatingOrder = true
+  posState.orderActionError = ''
+  renderPos()
+
+  try {
+    await updateOrder(updatedOrder)
+    await loadOrders({ shouldRender: false })
+  } catch (error) {
+    console.error('Failed to update saved order:', error)
+    posState.orderActionError =
+      'The order could not be updated. Please try again and do not repeat payment until the result is confirmed.'
+  } finally {
+    posState.isUpdatingOrder = false
+    renderPos()
+  }
+}
+
+async function markOrderReady(orderId) {
+  const order = posState.orders.find((item) => item.id === orderId)
+
+  if (
+    !order ||
+    order.fulfilmentStatus !== 'PREPARING' ||
+    posState.isUpdatingOrder
+  ) {
+    return
+  }
+
+  const now = new Date().toISOString()
+
+  await updateExistingOrder({
+    ...order,
+    fulfilmentStatus: 'READY',
+    readyAt: now,
+    updatedAt: now,
+  })
+}
+
+async function completePaidOrderHandover(orderId) {
+  const order = posState.orders.find((item) => item.id === orderId)
+
+  if (
+    !order ||
+    order.paymentStatus !== 'PAID' ||
+    order.fulfilmentStatus !== 'READY' ||
+    posState.isUpdatingOrder
+  ) {
+    return
+  }
+
+  const now = new Date().toISOString()
+
+  await updateExistingOrder({
+    ...order,
+    fulfilmentStatus: 'COMPLETED',
+    status: 'CLOSED',
+    completedAt: now,
+    updatedAt: now,
+  })
+}
+
+async function collectPaymentAndCompleteExistingOrder() {
+  const order = posState.orders.find(
+    (item) => item.id === posState.paymentTargetOrderId,
+  )
+
+  if (
+    !order ||
+    order.paymentStatus !== 'UNPAID' ||
+    order.fulfilmentStatus !== 'READY' ||
+    posState.isUpdatingOrder
+  ) {
+    posState.paymentError =
+      'This order is no longer available for payment. Refresh the orders list and try again.'
+    updateCashPaymentDisplay()
+    return
+  }
+
+  const now = new Date().toISOString()
+  const cashReceived =
+    posState.paymentMethod === 'cash'
+      ? Number(posState.cashReceived)
+      : null
+
+  const paymentRecord = {
+    id: crypto.randomUUID(),
+    method: posState.paymentMethod,
+    amount: order.total,
+    cashReceived,
+    change:
+      posState.paymentMethod === 'cash'
+        ? Number((cashReceived - order.total).toFixed(2))
+        : 0,
+    recordedAt: now,
+  }
+
+  posState.isPaymentDialogOpen = false
+
+  await updateExistingOrder({
+    ...order,
+    paymentStatus: 'PAID',
+    fulfilmentStatus: 'COMPLETED',
+    status: 'CLOSED',
+    payments: [...(order.payments || []), paymentRecord],
+    completedAt: now,
+    updatedAt: now,
+  })
+
+  posState.paymentMode = 'new-order'
+  posState.paymentTargetOrderId = null
+  posState.paymentMethod = 'cash'
+  posState.cashReceived = ''
+  posState.paymentError = ''
 }
 
 function startNewOrder() {
@@ -1441,10 +1651,13 @@ async function refreshSavedOrderCount() {
   }
 }
 
-async function loadOrders() {
+async function loadOrders({ shouldRender = true } = {}) {
   posState.isLoadingOrders = true
   posState.ordersLoadError = ''
-  renderPos()
+
+  if (shouldRender) {
+    renderPos()
+  }
 
   try {
     posState.orders = await getAllOrders()
@@ -1463,7 +1676,10 @@ async function loadOrders() {
       'Saved orders could not be loaded from this device. Please refresh and try again.'
   } finally {
     posState.isLoadingOrders = false
-    renderPos()
+
+    if (shouldRender) {
+      renderPos()
+    }
   }
 }
 
@@ -1519,6 +1735,28 @@ function attachPosEventListeners() {
   document.querySelector('[data-refresh-orders]')?.addEventListener('click', () => {
     loadOrders()
   })
+
+  document.querySelectorAll('[data-mark-order-ready]').forEach((button) => {
+    button.addEventListener('click', () => {
+      markOrderReady(button.dataset.markOrderReady)
+    })
+  })
+
+  document
+    .querySelectorAll('[data-complete-handover]')
+    .forEach((button) => {
+      button.addEventListener('click', () => {
+        completePaidOrderHandover(button.dataset.completeHandover)
+      })
+    })
+
+  document
+    .querySelectorAll('[data-collect-payment-complete]')
+    .forEach((button) => {
+      button.addEventListener('click', () => {
+        openExistingOrderPayment(button.dataset.collectPaymentComplete)
+      })
+    })
 
   document.querySelectorAll('[data-category-id]').forEach((button) => {
     button.addEventListener('click', () => {
@@ -1662,7 +1900,7 @@ function attachPosEventListeners() {
 
   document.querySelectorAll('input[name="payment-method"]').forEach((input) => {
     input.addEventListener('change', (event) => {
-      if (!posState.isSavingOrder) {
+      if (!posState.isSavingOrder && !posState.isUpdatingOrder) {
         posState.paymentMethod = event.target.value
         posState.paymentError = ''
         renderPos()

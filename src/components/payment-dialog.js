@@ -1,6 +1,15 @@
 import { formatShortGhs } from '../utils/formatters.js'
 
-export function renderPaymentDialog({ total, paymentMethod, cashReceived, error }) {
+export function renderPaymentDialog({
+  total,
+  paymentMethod,
+  cashReceived,
+  error,
+  title = 'Payment',
+  eyebrow = 'Complete order',
+  confirmLabel = 'Confirm payment',
+  description = '',
+}) {
   const cashValue = Number(cashReceived)
   const validCashAmount = Number.isFinite(cashValue) && cashValue >= 0
   const change = validCashAmount ? Math.max(cashValue - total, 0) : 0
@@ -11,9 +20,9 @@ export function renderPaymentDialog({ total, paymentMethod, cashReceived, error 
       <form class="payment-dialog__form" method="dialog">
         <header class="payment-dialog__header">
           <div>
-            <p class="payment-dialog__eyebrow">Complete order</p>
+            <p class="payment-dialog__eyebrow">${eyebrow}</p>
             <h2 class="payment-dialog__title" id="payment-dialog-title">
-              Payment
+              ${title}
             </h2>
           </div>
 
@@ -28,6 +37,12 @@ export function renderPaymentDialog({ total, paymentMethod, cashReceived, error 
         </header>
 
         <div class="payment-dialog__body">
+          ${
+            description
+              ? `<p class="payment-dialog__description">${description}</p>`
+              : ''
+          }
+
           <section class="payment-total" aria-label="Amount due">
             <span class="payment-total__label">Amount due</span>
             <strong class="payment-total__value">${formatShortGhs(total)}</strong>
@@ -148,7 +163,7 @@ export function renderPaymentDialog({ total, paymentMethod, cashReceived, error 
           </button>
 
           <button class="button button--primary" type="submit" data-confirm-payment>
-            Confirm payment
+            ${confirmLabel}
           </button>
         </footer>
       </form>

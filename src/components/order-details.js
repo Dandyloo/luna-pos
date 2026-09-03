@@ -17,6 +17,90 @@ function getFulfilmentLabel(order) {
   return labels[order.fulfilmentStatus] || order.fulfilmentStatus
 }
 
+function getPaymentMethodLabel(paymentMethod) {
+  const labels = {
+    cash: 'Cash',
+    momo: 'Mobile Money',
+    card: 'Card',
+  }
+
+  return labels[paymentMethod] || paymentMethod
+}
+
+function renderOrderActions(order) {
+  if (order.fulfilmentStatus === 'PREPARING') {
+    return `
+      <section class="order-details__actions">
+        <p class="order-details__action-note">
+          This order is currently being prepared.
+        </p>
+
+        <button
+          class="button button--primary button--full"
+          type="button"
+          data-mark-order-ready="${order.id}"
+        >
+          Mark ready
+        </button>
+      </section>
+    `
+  }
+
+  if (
+    order.fulfilmentStatus === 'READY' &&
+    order.paymentStatus === 'UNPAID'
+  ) {
+    return `
+      <section class="order-details__actions">
+        <p class="order-details__action-note">
+          This order is ready. Receive payment before handing it to the customer.
+        </p>
+
+        <button
+          class="button button--primary button--full"
+          type="button"
+          data-collect-payment-complete="${order.id}"
+        >
+          Collect payment & complete
+        </button>
+      </section>
+    `
+  }
+
+  if (
+    order.fulfilmentStatus === 'READY' &&
+    order.paymentStatus === 'PAID'
+  ) {
+    return `
+      <section class="order-details__actions">
+        <p class="order-details__action-note">
+          Payment has been received. Confirm handover when the customer collects the order.
+        </p>
+
+        <button
+          class="button button--primary button--full"
+          type="button"
+          data-complete-handover="${order.id}"
+        >
+          Complete handover
+        </button>
+      </section>
+    `
+  }
+
+  if (order.fulfilmentStatus === 'COMPLETED') {
+    return `
+      <section class="order-details__actions">
+        <p class="order-details__action-note">
+          This order has been paid for and completed. It is now a read-only historical record.
+        </p>
+      </section>
+    `
+  }
+
+  return ''
+}
+
 export function renderOrderDetails(order) {
   if (!order) {
     return `
@@ -70,6 +154,8 @@ export function renderOrderDetails(order) {
           <strong>${order.sourceDevice}</strong>
         </div>
       </section>
+
+      ${renderOrderActions(order)}
 
       <section class="order-details__section">
         <h3 class="order-details__section-title">Items</h3>
@@ -151,13 +237,8 @@ export function renderOrderDetails(order) {
                 <div>
                   <span>Payment</span>
                   <strong>
-                    ${
-                      payment.method === 'momo'
-                        ? 'Mobile Money'
-                        : payment.method === 'card'
-                          ? 'Card'
-                          : 'Cash'
-                    } · ${formatDateTime(new Date(payment.recordedAt))}
+                    ${getPaymentMethodLabel(payment.method)} ·
+                    ${formatDateTime(new Date(payment.recordedAt))}
                   </strong>
                 </div>
               `
@@ -167,6 +248,28 @@ export function renderOrderDetails(order) {
                   <strong>Not received</strong>
                 </div>
               `
+          }
+
+          ${
+            order.readyAt
+              ? `
+                <div>
+                  <span>Ready</span>
+                  <strong>${formatDateTime(new Date(order.readyAt))}</strong>
+                </div>
+              `
+              : ''
+          }
+
+          ${
+            order.completedAt
+              ? `
+                <div>
+                  <span>Completed</span>
+                  <strong>${formatDateTime(new Date(order.completedAt))}</strong>
+                </div>
+              `
+              : ''
           }
         </div>
       </section>
