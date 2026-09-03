@@ -3,7 +3,10 @@ import './styles/global.css'
 import './styles/launcher.css'
 import './styles/pos.css'
 
+import { renderNoProductsState, renderProductCard } from './components/product-card.js'
+import { categories, menuItems } from './data/menu-data.js'
 import { getAppUrl, getCurrentApp } from './modules/app-router.js'
+import { getCategoryById, handleProductImageError } from './utils/product-utils.js'
 
 const app = document.querySelector('#app')
 
@@ -60,16 +63,21 @@ const posNavigation = [
   { icon: '⚙', label: 'Settings', isActive: false },
 ]
 
-const posCategories = [
-  { icon: '🍽️', label: 'All Items', isActive: true },
-  { icon: '🔥', label: 'Popular', isActive: false },
-  { icon: '🍳', label: 'Breakfast', isActive: false },
-  { icon: '🥐', label: 'Quick Bites', isActive: false },
-  { icon: '🍕', label: 'Pizza', isActive: false },
-  { icon: '🧋', label: 'Luna Boba', isActive: false },
-  { icon: '☕', label: 'Hot Drinks', isActive: false },
-  { icon: '🥤', label: 'Soft Drinks', isActive: false },
-]
+const posState = {
+  selectedCategoryId: 'all',
+  searchQuery: '',
+  showPopularOnly: false,
+  orderType: 'dine-in',
+}
+
+function escapeHtml(value) {
+  return String(value)
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#039;')
+}
 
 function renderLauncher() {
   const cards = applicationCards
@@ -123,57 +131,106 @@ function renderLauncher() {
   `
 }
 
-function renderProductSkeletons() {
-  return Array.from(
-    { length: 9 },
-    () => `
-      <article class="product-skeleton" aria-hidden="true">
-        <div class="product-skeleton__image"></div>
-        <div class="product-skeleton__content">
-          <div class="product-skeleton__line product-skeleton__line--title"></div>
-          <div class="product-skeleton__line"></div>
-          <div class="product-skeleton__line product-skeleton__line--short"></div>
-        </div>
-      </article>
-    `,
-  ).join('')
+function getVisibleProducts() {
+  const normalizedQuery = posState.searchQuery.trim().toLowerCase()
+
+  return menuItems.filter((product) => {
+    const matchesCategory =
+      posState.selectedCategoryId === 'all' ||
+      product.categoryId === posState.selectedCategoryId
+
+    const matchesPopular = !posState.showPopularOnly || product.isPopular
+
+    const searchableText = [
+      product.name,
+      product.description,
+      getCategoryById(product.categoryId)?.name ?? '',
+      ...product.variants.map((variant) => variant.name),
+    ]
+      .join(' ')
+      .toLowerCase()
+
+    const matchesSearch =
+      normalizedQuery === '' || searchableText.includes(normalizedQuery)
+
+    return matchesCategory && matchesPopular && matchesSearch
+  })
 }
 
-function renderPos() {
-  const navigation = posNavigation
-    .map(
-      (item) => `
-        <button
-          class="pos-nav-item ${item.isActive ? 'pos-nav-item--active' : ''}"
-          type="button"
-          aria-current="${item.isActive ? 'page' : 'false'}"
-        >
-          <span class="pos-nav-item__icon" aria-hidden="true">${item.icon}</span>
-          <span class="pos-nav-item__label">${item.label}</span>
-        </button>
-      `,
-    )
-    .join('')
+function renderPosCategories() {
+  const allCategoryButton = `
+    <button
+      class="category-filter ${
+        posState.selectedCategoryId === 'all' && !posState.showPopularOnly
+          ? 'category-filter--active'
+          : ''
+      }"
+      type="button"
+      data-category-id="all"
+      aria-pressed="${
+        posState.selectedCategoryId === 'all' && !posState.showPopularOnly
+      }"
+    >
+      <span class="category-filter__icon" aria-hidden="true">🍽️</span>
+      All Items
+    </button>
+  `
 
-  const categories = posCategories
+  const popularButton = `
+    <button
+      class="category-filter ${
+        posState.showPopularOnly ? 'category-filter--active' : ''
+      }"
+      type="button"
+      data-popular-filter="true"
+      aria-pressed="${posState.showPopularOnly}"
+    >
+      <span class="category-filter__icon" aria-hidden="true">🔥</span>
+      Popular
+    </button>
+  `
+
+  const categoryButtons = categories
+    .filter((category) => category.id !== 'all')
     .map(
       (category) => `
         <button
           class="category-filter ${
-            category.isActive ? 'category-filter--active' : ''
+            posState.selectedCategoryId === category.id &&
+            !posState.showPopularOnly
+              ? 'category-filter--active'
+              : ''
           }"
           type="button"
-          aria-pressed="${category.isActive}"
+          data-category-id="${category.id}"
+          aria-pressed="${
+            posState.selectedCategoryId === category.id &&
+            !posState.showPopularOnly
+          }"
         >
           <span class="category-filter__icon" aria-hidden="true">
             ${category.icon}
           </span>
-          ${category.label}
+          ${escapeHtml(category.name)}
         </button>
       `,
     )
     .join('')
 
+  return `${allCategoryButton}${popularButton}${categoryButtons}`
+}
+
+function renderProducts() {
+  const visibleProducts = getVisibleProducts()
+
+  if (visibleProducts.length === 0) {
+    return renderNoProductsState()
+  }
+
+  return visibleProducts.map((product) => renderProductCard(product)).join('')
+}
+
+function renderPos() {
   app.innerHTML = `
     <main class="pos-layout">
       <aside class="pos-sidebar" aria-label="Staff POS navigation">
@@ -187,7 +244,24 @@ function renderPos() {
         </div>
 
         <nav class="pos-sidebar__nav" aria-label="Primary navigation">
-          ${navigation}
+          ${posNavigation
+            .map(
+              (item) => `
+                <button
+                  class="pos-nav-item ${
+                    item.isActive ? 'pos-nav-item--active' : ''
+                  }"
+                  type="button"
+                  aria-current="${item.isActive ? 'page' : 'false'}"
+                >
+                  <span class="pos-nav-item__icon" aria-hidden="true">
+                    ${item.icon}
+                  </span>
+                  <span class="pos-nav-item__label">${item.label}</span>
+                </button>
+              `,
+            )
+            .join('')}
         </nav>
 
         <div class="pos-sidebar__footer">
@@ -224,14 +298,28 @@ function renderPos() {
 
         <div class="pos-order-options" aria-label="Order type">
           <button
-            class="order-type-button order-type-button--active"
+            class="order-type-button ${
+              posState.orderType === 'dine-in'
+                ? 'order-type-button--active'
+                : ''
+            }"
             type="button"
-            aria-pressed="true"
+            data-order-type="dine-in"
+            aria-pressed="${posState.orderType === 'dine-in'}"
           >
             🍽️ Dine-in
           </button>
 
-          <button class="order-type-button" type="button" aria-pressed="false">
+          <button
+            class="order-type-button ${
+              posState.orderType === 'takeaway'
+                ? 'order-type-button--active'
+                : ''
+            }"
+            type="button"
+            data-order-type="takeaway"
+            aria-pressed="${posState.orderType === 'takeaway'}"
+          >
             🥡 Takeaway
           </button>
         </div>
@@ -242,7 +330,11 @@ function renderPos() {
           <div class="pos-menu-toolbar">
             <div>
               <h2 class="pos-menu-toolbar__title" id="menu-title">Menu</h2>
-              <p class="pos-menu-toolbar__meta">Select an item to add it to the order</p>
+              <p class="pos-menu-toolbar__meta">
+                ${getVisibleProducts().length} item${
+                  getVisibleProducts().length === 1 ? '' : 's'
+                } available
+              </p>
             </div>
 
             <label class="pos-search">
@@ -251,18 +343,18 @@ function renderPos() {
                 class="pos-search__input"
                 type="search"
                 placeholder="Search menu"
-                aria-label="Search menu"
-                disabled
+                aria-label="Search Luna menu"
+                value="${escapeHtml(posState.searchQuery)}"
               />
             </label>
           </div>
 
           <div class="pos-category-scroll" aria-label="Menu categories">
-            ${categories}
+            ${renderPosCategories()}
           </div>
 
-          <div class="pos-products-placeholder" aria-label="Menu product cards loading soon">
-            ${renderProductSkeletons()}
+          <div class="pos-products-grid" aria-live="polite">
+            ${renderProducts()}
           </div>
         </section>
       </section>
@@ -319,6 +411,46 @@ function renderPos() {
       </aside>
     </main>
   `
+
+  attachPosEventListeners()
+}
+
+function attachPosEventListeners() {
+  const searchInput = document.querySelector('.pos-search__input')
+
+  searchInput?.addEventListener('input', (event) => {
+    posState.searchQuery = event.target.value
+    renderPos()
+  })
+
+  document.querySelectorAll('[data-category-id]').forEach((button) => {
+    button.addEventListener('click', () => {
+      posState.selectedCategoryId = button.dataset.categoryId
+      posState.showPopularOnly = false
+      renderPos()
+    })
+  })
+
+  document.querySelectorAll('[data-popular-filter]').forEach((button) => {
+    button.addEventListener('click', () => {
+      posState.showPopularOnly = !posState.showPopularOnly
+      posState.selectedCategoryId = 'all'
+      renderPos()
+    })
+  })
+
+  document.querySelectorAll('[data-order-type]').forEach((button) => {
+    button.addEventListener('click', () => {
+      posState.orderType = button.dataset.orderType
+      renderPos()
+    })
+  })
+
+  document.querySelectorAll('.product-card__image').forEach((image) => {
+    image.addEventListener('error', () => {
+      handleProductImageError(image, image.dataset.fallbackImage)
+    })
+  })
 }
 
 function renderPlaceholder(appName) {
