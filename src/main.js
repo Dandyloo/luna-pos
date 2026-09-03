@@ -1,9 +1,12 @@
 import './styles/tokens.css'
 import './styles/global.css'
 import './styles/launcher.css'
+import './styles/orders.css'
 import './styles/pos.css'
 
 import { renderItemCustomizationDialog } from './components/item-customization-dialog.js'
+import { renderOrderCard, renderOrdersEmptyState } from './components/order-card.js'
+import { renderOrderDetails } from './components/order-details.js'
 import { renderPaymentDialog } from './components/payment-dialog.js'
 import { renderNoProductsState, renderProductCard } from './components/product-card.js'
 import { categories, menuItems, modifierGroups } from './data/menu-data.js'
@@ -77,14 +80,24 @@ const applicationCards = [
 ]
 
 const posNavigation = [
-  { icon: '01', label: 'New Order', isActive: true },
-  { icon: '02', label: 'Orders', isActive: false },
-  { icon: '03', label: 'Sales', isActive: false },
-  { icon: '04', label: 'Items', isActive: false },
-  { icon: '05', label: 'Settings', isActive: false },
+  { id: 'new-order', icon: '01', label: 'New Order' },
+  { id: 'orders', icon: '02', label: 'Orders' },
+  { id: 'sales', icon: '03', label: 'Sales' },
+  { id: 'items', icon: '04', label: 'Items' },
+  { id: 'settings', icon: '05', label: 'Settings' },
+]
+
+const orderFilterOptions = [
+  { id: 'all', label: 'All' },
+  { id: 'preparing', label: 'Preparing' },
+  { id: 'ready', label: 'Ready' },
+  { id: 'payment-pending', label: 'Payment Pending' },
+  { id: 'paid', label: 'Paid' },
+  { id: 'completed', label: 'Completed' },
 ]
 
 const posState = {
+  activeView: 'new-order',
   selectedCategoryId: 'all',
   searchQuery: '',
   showPopularOnly: false,
@@ -104,6 +117,11 @@ const posState = {
   savedOrderCount: 0,
   isSavingOrder: false,
   saveOrderError: '',
+  orders: [],
+  selectedOrderId: null,
+  ordersFilter: 'all',
+  isLoadingOrders: false,
+  ordersLoadError: '',
 }
 
 function escapeHtml(value) {
@@ -150,6 +168,43 @@ function getVisibleProducts() {
 
     return matchesCategory && matchesPopular && matchesSearch
   })
+}
+
+function getFilteredOrders() {
+  return posState.orders.filter((order) => {
+    if (posState.ordersFilter === 'all') {
+      return true
+    }
+
+    if (posState.ordersFilter === 'preparing') {
+      return order.fulfilmentStatus === 'PREPARING'
+    }
+
+    if (posState.ordersFilter === 'ready') {
+      return order.fulfilmentStatus === 'READY'
+    }
+
+    if (posState.ordersFilter === 'payment-pending') {
+      return order.paymentStatus === 'UNPAID'
+    }
+
+    if (posState.ordersFilter === 'paid') {
+      return order.paymentStatus === 'PAID'
+    }
+
+    if (posState.ordersFilter === 'completed') {
+      return order.fulfilmentStatus === 'COMPLETED'
+    }
+
+    return true
+  })
+}
+
+function getSelectedOrder() {
+  return (
+    posState.orders.find((order) => order.id === posState.selectedOrderId) ||
+    null
+  )
 }
 
 function renderLauncher() {
@@ -202,6 +257,26 @@ function renderLauncher() {
       </section>
     </main>
   `
+}
+
+function renderPosNavigation() {
+  return posNavigation
+    .map(
+      (item) => `
+        <button
+          class="pos-nav-item ${
+            posState.activeView === item.id ? 'pos-nav-item--active' : ''
+          }"
+          type="button"
+          data-pos-view="${item.id}"
+          aria-current="${posState.activeView === item.id ? 'page' : 'false'}"
+        >
+          <span class="pos-nav-item__icon" aria-hidden="true">${item.icon}</span>
+          <span class="pos-nav-item__label">${item.label}</span>
+        </button>
+      `,
+    )
+    .join('')
 }
 
 function renderPosCategories() {
@@ -643,7 +718,7 @@ function renderOrderConfirmation() {
       <p class="order-confirmed__copy">
         ${order.itemCount} item${order.itemCount === 1 ? '' : 's'} ·
         ${formatShortGhs(order.total)} ·
-        ${isPaid ? getPaymentMethodLabel(order.paymentMethod) : 'Unpaid'} ·
+        ${isPaid ? getPaymentMethodLabel(order.payments?.[0]?.method) : 'Unpaid'} ·
         ${getFulfilmentStatusLabel(order.fulfilmentStatus)}
       </p>
 
@@ -654,8 +729,205 @@ function renderOrderConfirmation() {
   `
 }
 
-function renderPos() {
+function renderOrdersWorkspace() {
+  const filteredOrders = getFilteredOrders()
+  const selectedOrder = getSelectedOrder()
+
+  return `
+    <section class="pos-workspace" aria-labelledby="orders-title">
+      <header class="pos-header">
+        <div>
+          <p class="pos-header__eyebrow">${CURRENT_DEVICE_NAME}</p>
+          <h1 class="pos-header__title" id="orders-title">Orders</h1>
+        </div>
+
+        <div class="pos-header__actions">
+          <span class="connection-status" title="Orders are currently stored only on this device">
+            <span class="connection-status__dot" aria-hidden="true"></span>
+            Local mode
+          </span>
+
+          <button class="pos-header__button" type="button" data-refresh-orders>
+            Refresh
+          </button>
+        </div>
+      </header>
+
+      <div class="pos-divider"></div>
+
+      ${
+        posState.ordersLoadError
+          ? `
+            <p class="order-save-error" role="alert">
+              ${escapeHtml(posState.ordersLoadError)}
+            </p>
+          `
+          : ''
+      }
+
+      <section class="orders-workspace">
+        <section class="orders-list-panel" aria-labelledby="orders-list-title">
+          <header class="orders-list-panel__header">
+            <p class="orders-list-panel__eyebrow">Saved locally</p>
+            <h2 class="orders-list-panel__title" id="orders-list-title">
+              Order queue
+            </h2>
+
+            <p class="orders-list-panel__count">
+              ${
+                posState.isLoadingOrders
+                  ? 'Loading orders...'
+                  : `${filteredOrders.length} order${
+                      filteredOrders.length === 1 ? '' : 's'
+                    } shown`
+              }
+            </p>
+
+            <div class="orders-filter-row" aria-label="Order filters">
+              ${orderFilterOptions
+                .map(
+                  (filter) => `
+                    <button
+                      class="orders-filter ${
+                        posState.ordersFilter === filter.id
+                          ? 'orders-filter--active'
+                          : ''
+                      }"
+                      type="button"
+                      data-orders-filter="${filter.id}"
+                      aria-pressed="${posState.ordersFilter === filter.id}"
+                    >
+                      ${filter.label}
+                    </button>
+                  `,
+                )
+                .join('')}
+            </div>
+          </header>
+
+          <div class="orders-list" aria-live="polite">
+            ${
+              posState.isLoadingOrders
+                ? '<p class="orders-list-panel__count">Loading saved orders...</p>'
+                : filteredOrders.length > 0
+                  ? filteredOrders
+                      .map((order) =>
+                        renderOrderCard(
+                          order,
+                          order.id === posState.selectedOrderId,
+                        ),
+                      )
+                      .join('')
+                  : renderOrdersEmptyState()
+            }
+          </div>
+        </section>
+
+        <aside class="orders-details-panel">
+          ${renderOrderDetails(selectedOrder)}
+        </aside>
+      </section>
+    </section>
+  `
+}
+
+function renderNewOrderWorkspace() {
   const visibleProductCount = getVisibleProducts().length
+
+  return `
+    <section class="pos-workspace" aria-labelledby="pos-title">
+      <header class="pos-header">
+        <div>
+          <p class="pos-header__eyebrow">${CURRENT_DEVICE_NAME}</p>
+          <h1 class="pos-header__title" id="pos-title">New order</h1>
+        </div>
+
+        <div class="pos-header__actions">
+          <span class="connection-status" title="Orders are currently stored only on this device">
+            <span class="connection-status__dot" aria-hidden="true"></span>
+            Local mode
+          </span>
+
+          <button class="pos-header__button" type="button" data-pos-view="orders">
+            ${posState.savedOrderCount} saved order${
+              posState.savedOrderCount === 1 ? '' : 's'
+            }
+          </button>
+        </div>
+      </header>
+
+      <div class="pos-order-options" aria-label="Order type">
+        <button
+          class="order-type-button ${
+            posState.orderType === 'dine-in' ? 'order-type-button--active' : ''
+          }"
+          type="button"
+          data-order-type="dine-in"
+          aria-pressed="${posState.orderType === 'dine-in'}"
+          ${posState.isSavingOrder ? 'disabled' : ''}
+        >
+          Dine-in
+        </button>
+
+        <button
+          class="order-type-button ${
+            posState.orderType === 'takeaway' ? 'order-type-button--active' : ''
+          }"
+          type="button"
+          data-order-type="takeaway"
+          aria-pressed="${posState.orderType === 'takeaway'}"
+          ${posState.isSavingOrder ? 'disabled' : ''}
+        >
+          Takeaway
+        </button>
+      </div>
+
+      <div class="pos-divider"></div>
+
+      <section aria-labelledby="menu-title">
+        <div class="pos-menu-toolbar">
+          <div>
+            <h2 class="pos-menu-toolbar__title" id="menu-title">Menu</h2>
+            <p class="pos-menu-toolbar__meta" data-product-count>
+              ${visibleProductCount} item${
+                visibleProductCount === 1 ? '' : 's'
+              } available
+            </p>
+          </div>
+
+          <label class="pos-search">
+            <span class="pos-search__icon" aria-hidden="true"></span>
+            <input
+              class="pos-search__input"
+              type="search"
+              placeholder="Search menu"
+              aria-label="Search Luna menu"
+              value="${escapeHtml(posState.searchQuery)}"
+              autocomplete="off"
+              autocapitalize="none"
+              spellcheck="false"
+              ${posState.isSavingOrder ? 'disabled' : ''}
+            />
+          </label>
+        </div>
+
+        <div class="pos-category-scroll" aria-label="Menu categories">
+          ${renderPosCategories()}
+        </div>
+
+        <div class="pos-products-grid" aria-live="polite">
+          ${renderProducts()}
+        </div>
+      </section>
+    </section>
+  `
+}
+
+function renderPos() {
+  const workspace =
+    posState.activeView === 'orders'
+      ? renderOrdersWorkspace()
+      : renderNewOrderWorkspace()
 
   app.innerHTML = `
     <main class="pos-layout">
@@ -670,24 +942,7 @@ function renderPos() {
         </div>
 
         <nav class="pos-sidebar__nav" aria-label="Primary navigation">
-          ${posNavigation
-            .map(
-              (item) => `
-                <button
-                  class="pos-nav-item ${
-                    item.isActive ? 'pos-nav-item--active' : ''
-                  }"
-                  type="button"
-                  aria-current="${item.isActive ? 'page' : 'false'}"
-                >
-                  <span class="pos-nav-item__icon" aria-hidden="true">
-                    ${item.icon}
-                  </span>
-                  <span class="pos-nav-item__label">${item.label}</span>
-                </button>
-              `,
-            )
-            .join('')}
+          ${renderPosNavigation()}
         </nav>
 
         <div class="pos-sidebar__footer">
@@ -703,97 +958,13 @@ function renderPos() {
         </div>
       </aside>
 
-      <section class="pos-workspace" aria-labelledby="pos-title">
-        <header class="pos-header">
-          <div>
-            <p class="pos-header__eyebrow">${CURRENT_DEVICE_NAME}</p>
-            <h1 class="pos-header__title" id="pos-title">New order</h1>
-          </div>
+      ${workspace}
 
-          <div class="pos-header__actions">
-            <span class="connection-status" title="Orders are currently stored only on this device">
-              <span class="connection-status__dot" aria-hidden="true"></span>
-              Local mode
-            </span>
-
-            <button class="pos-header__button" type="button">
-              ${posState.savedOrderCount} saved order${
-                posState.savedOrderCount === 1 ? '' : 's'
-              }
-            </button>
-          </div>
-        </header>
-
-        <div class="pos-order-options" aria-label="Order type">
-          <button
-            class="order-type-button ${
-              posState.orderType === 'dine-in'
-                ? 'order-type-button--active'
-                : ''
-            }"
-            type="button"
-            data-order-type="dine-in"
-            aria-pressed="${posState.orderType === 'dine-in'}"
-            ${posState.isSavingOrder ? 'disabled' : ''}
-          >
-            Dine-in
-          </button>
-
-          <button
-            class="order-type-button ${
-              posState.orderType === 'takeaway'
-                ? 'order-type-button--active'
-                : ''
-            }"
-            type="button"
-            data-order-type="takeaway"
-            aria-pressed="${posState.orderType === 'takeaway'}"
-            ${posState.isSavingOrder ? 'disabled' : ''}
-          >
-            Takeaway
-          </button>
-        </div>
-
-        <div class="pos-divider"></div>
-
-        <section aria-labelledby="menu-title">
-          <div class="pos-menu-toolbar">
-            <div>
-              <h2 class="pos-menu-toolbar__title" id="menu-title">Menu</h2>
-              <p class="pos-menu-toolbar__meta" data-product-count>
-                ${visibleProductCount} item${
-                  visibleProductCount === 1 ? '' : 's'
-                } available
-              </p>
-            </div>
-
-            <label class="pos-search">
-              <span class="pos-search__icon" aria-hidden="true"></span>
-              <input
-                class="pos-search__input"
-                type="search"
-                placeholder="Search menu"
-                aria-label="Search Luna menu"
-                value="${escapeHtml(posState.searchQuery)}"
-                autocomplete="off"
-                autocapitalize="none"
-                spellcheck="false"
-                ${posState.isSavingOrder ? 'disabled' : ''}
-              />
-            </label>
-          </div>
-
-          <div class="pos-category-scroll" aria-label="Menu categories">
-            ${renderPosCategories()}
-          </div>
-
-          <div class="pos-products-grid" aria-live="polite">
-            ${renderProducts()}
-          </div>
-        </section>
-      </section>
-
-      ${renderOrderPanel()}
+      ${
+        posState.activeView === 'new-order'
+          ? renderOrderPanel()
+          : '<aside class="pos-order-panel" aria-label="Orders workspace information"><section class="order-panel__empty"><div class="order-panel__empty-content"><div class="order-panel__empty-icon" aria-hidden="true"></div><p class="order-panel__empty-title">Order queue</p><p class="order-panel__empty-copy">Select an order from the Orders workspace to review its details.</p></div></section></aside>'
+      }
     </main>
 
     ${renderActiveCustomizationDialog()}
@@ -1258,6 +1429,7 @@ async function completeCurrentPayment() {
 
 function startNewOrder() {
   posState.lastSubmittedOrder = null
+  posState.activeView = 'new-order'
   renderPos()
 }
 
@@ -1269,20 +1441,29 @@ async function refreshSavedOrderCount() {
   }
 }
 
-async function logSavedOrdersForDevelopment() {
+async function loadOrders() {
+  posState.isLoadingOrders = true
+  posState.ordersLoadError = ''
+  renderPos()
+
   try {
-    const orders = await getAllOrders()
-    console.table(
-      orders.map((order) => ({
-        orderNumber: order.orderNumber,
-        paymentStatus: order.paymentStatus,
-        fulfilmentStatus: order.fulfilmentStatus,
-        total: order.total,
-        createdAt: order.createdAt,
-      })),
+    posState.orders = await getAllOrders()
+    posState.savedOrderCount = posState.orders.length
+
+    const selectedOrderStillExists = posState.orders.some(
+      (order) => order.id === posState.selectedOrderId,
     )
+
+    if (!selectedOrderStillExists) {
+      posState.selectedOrderId = posState.orders[0]?.id || null
+    }
   } catch (error) {
-    console.error('Failed to read locally saved orders:', error)
+    console.error('Failed to load saved orders:', error)
+    posState.ordersLoadError =
+      'Saved orders could not be loaded from this device. Please refresh and try again.'
+  } finally {
+    posState.isLoadingOrders = false
+    renderPos()
   }
 }
 
@@ -1292,6 +1473,51 @@ function attachPosEventListeners() {
   searchInput?.addEventListener('input', (event) => {
     posState.searchQuery = event.target.value
     updateProductsArea()
+  })
+
+  document.querySelectorAll('[data-pos-view]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      const requestedView = button.dataset.posView
+
+      if (requestedView === 'orders') {
+        posState.activeView = 'orders'
+        await loadOrders()
+        return
+      }
+
+      if (requestedView === 'new-order') {
+        posState.activeView = 'new-order'
+        renderPos()
+      }
+    })
+  })
+
+  document.querySelectorAll('[data-orders-filter]').forEach((button) => {
+    button.addEventListener('click', () => {
+      posState.ordersFilter = button.dataset.ordersFilter
+      const filteredOrders = getFilteredOrders()
+
+      const selectedOrderIsVisible = filteredOrders.some(
+        (order) => order.id === posState.selectedOrderId,
+      )
+
+      if (!selectedOrderIsVisible) {
+        posState.selectedOrderId = filteredOrders[0]?.id || null
+      }
+
+      renderPos()
+    })
+  })
+
+  document.querySelectorAll('[data-select-order]').forEach((button) => {
+    button.addEventListener('click', () => {
+      posState.selectedOrderId = button.dataset.selectOrder
+      renderPos()
+    })
+  })
+
+  document.querySelector('[data-refresh-orders]')?.addEventListener('click', () => {
+    loadOrders()
   })
 
   document.querySelectorAll('[data-category-id]').forEach((button) => {
@@ -1516,7 +1742,6 @@ async function renderApp() {
   if (currentApp === 'pos') {
     await refreshSavedOrderCount()
     renderPos()
-    await logSavedOrdersForDevelopment()
     return
   }
 

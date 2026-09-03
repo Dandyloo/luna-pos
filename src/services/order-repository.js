@@ -16,3 +16,8 @@ export async function getOrderCount() {
 export async function getOrderById(orderId) {
   return db.orders.get(orderId)
 }
+
+export async function updateOrder(order) {
+  await db.orders.put(order)
+  return order
+}
