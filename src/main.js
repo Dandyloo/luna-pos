@@ -3,17 +3,32 @@ import './styles/global.css'
 import './styles/launcher.css'
 import './styles/pos.css'
 
+import { renderItemCustomizationDialog } from './components/item-customization-dialog.js'
 import { renderNoProductsState, renderProductCard } from './components/product-card.js'
-import { categories, menuItems } from './data/menu-data.js'
+import { categories, menuItems, modifierGroups } from './data/menu-data.js'
 import { getAppUrl, getCurrentApp } from './modules/app-router.js'
-import { getCategoryById, handleProductImageError } from './utils/product-utils.js'
+import {
+  addCartItem,
+  createCartItem,
+  getCartItemLineTotal,
+  getCartItemUnitTotal,
+  getCartQuantity,
+  getCartSubtotal,
+  updateCartItemQuantity,
+} from './utils/order-utils.js'
+import {
+  getCategoryById,
+  getProductStartingPrice,
+  handleProductImageError,
+} from './utils/product-utils.js'
+import { formatShortGhs } from './utils/formatters.js'
 
 const app = document.querySelector('#app')
 
 const applicationCards = [
   {
     appName: 'pos',
-    icon: '🧾',
+    icon: 'POS',
     label: 'Counter tablet',
     title: 'Staff POS',
     description:
@@ -27,7 +42,7 @@ const applicationCards = [
   },
   {
     appName: 'customer-display',
-    icon: '✨',
+    icon: 'CD',
     label: 'Second tablet',
     title: 'Customer Display',
     description:
@@ -41,7 +56,7 @@ const applicationCards = [
   },
   {
     appName: 'back-office',
-    icon: '📊',
+    icon: 'BO',
     label: 'Owner workspace',
     title: 'Back Office',
     description:
@@ -56,11 +71,11 @@ const applicationCards = [
 ]
 
 const posNavigation = [
-  { icon: '⌑', label: 'New Order', isActive: true },
-  { icon: '◫', label: 'Orders', isActive: false },
-  { icon: '◈', label: 'Sales', isActive: false },
-  { icon: '▦', label: 'Items', isActive: false },
-  { icon: '⚙', label: 'Settings', isActive: false },
+  { icon: '01', label: 'New Order', isActive: true },
+  { icon: '02', label: 'Orders', isActive: false },
+  { icon: '03', label: 'Sales', isActive: false },
+  { icon: '04', label: 'Items', isActive: false },
+  { icon: '05', label: 'Settings', isActive: false },
 ]
 
 const posState = {
@@ -68,6 +83,8 @@ const posState = {
   searchQuery: '',
   showPopularOnly: false,
   orderType: 'dine-in',
+  cartItems: [],
+  activeProductId: null,
 }
 
 function escapeHtml(value) {
@@ -109,7 +126,7 @@ function renderLauncher() {
       <header class="launcher__header">
         <div>
           <div class="launcher__brand" aria-label="Luna Café and Eatery">
-            <span class="launcher__brand-moon" aria-hidden="true">◒</span>
+            <span class="launcher__brand-moon" aria-hidden="true">L</span>
             <span>LUNA</span>
           </div>
 
@@ -171,7 +188,7 @@ function renderPosCategories() {
         posState.selectedCategoryId === 'all' && !posState.showPopularOnly
       }"
     >
-      <span class="category-filter__icon" aria-hidden="true">🍽️</span>
+      <span class="category-filter__icon" aria-hidden="true"></span>
       All Items
     </button>
   `
@@ -185,7 +202,7 @@ function renderPosCategories() {
       data-popular-filter="true"
       aria-pressed="${posState.showPopularOnly}"
     >
-      <span class="category-filter__icon" aria-hidden="true">🔥</span>
+      <span class="category-filter__icon" aria-hidden="true"></span>
       Popular
     </button>
   `
@@ -208,9 +225,7 @@ function renderPosCategories() {
             !posState.showPopularOnly
           }"
         >
-          <span class="category-filter__icon" aria-hidden="true">
-            ${category.icon}
-          </span>
+          <span class="category-filter__icon" aria-hidden="true"></span>
           ${escapeHtml(category.name)}
         </button>
       `,
@@ -230,13 +245,178 @@ function renderProducts() {
   return visibleProducts.map((product) => renderProductCard(product)).join('')
 }
 
+function renderCartItem(cartItem) {
+  const modifierNames = cartItem.modifiers.map((modifier) => modifier.name)
+  const details = [cartItem.variantName, ...modifierNames].join(' · ')
+
+  return `
+    <article class="cart-item">
+      <img
+        class="cart-item__image"
+        src="${cartItem.image}"
+        alt=""
+        data-fallback-image="${cartItem.fallbackImage}"
+      />
+
+      <div class="cart-item__content">
+        <div class="cart-item__top-row">
+          <span class="cart-item__name">${escapeHtml(cartItem.productName)}</span>
+          <span class="cart-item__line-total">
+            ${formatShortGhs(getCartItemLineTotal(cartItem))}
+          </span>
+        </div>
+
+        <span class="cart-item__details">${escapeHtml(details)}</span>
+
+        <div class="cart-item__bottom-row">
+          <span class="cart-item__unit-price">
+            ${formatShortGhs(getCartItemUnitTotal(cartItem))} each
+          </span>
+
+          <div class="cart-item__quantity" aria-label="Quantity controls">
+            <button
+              class="cart-item__quantity-button"
+              type="button"
+              data-decrease-cart-item="${cartItem.id}"
+              aria-label="Decrease ${cartItem.productName} quantity"
+            >
+              −
+            </button>
+
+            <span class="cart-item__quantity-value">${cartItem.quantity}</span>
+
+            <button
+              class="cart-item__quantity-button"
+              type="button"
+              data-increase-cart-item="${cartItem.id}"
+              aria-label="Increase ${cartItem.productName} quantity"
+            >
+              +
+            </button>
+          </div>
+        </div>
+      </div>
+    </article>
+  `
+}
+
+function renderOrderPanel() {
+  const subtotal = getCartSubtotal(posState.cartItems)
+  const cartQuantity = getCartQuantity(posState.cartItems)
+  const hasItems = posState.cartItems.length > 0
+
+  return `
+    <aside class="pos-order-panel" aria-labelledby="order-panel-title">
+      <header class="order-panel__header">
+        <div>
+          <p class="order-panel__eyebrow">Current order</p>
+          <h2 class="order-panel__title" id="order-panel-title">Order #Draft</h2>
+        </div>
+
+        <button
+          class="order-panel__icon-button"
+          type="button"
+          data-clear-order
+          aria-label="Clear current order"
+          ${hasItems ? '' : 'disabled'}
+        >
+          ×
+        </button>
+      </header>
+
+      ${
+        hasItems
+          ? `
+            <section
+              class="order-panel__items"
+              aria-label="${cartQuantity} item${cartQuantity === 1 ? '' : 's'} in current order"
+            >
+              ${posState.cartItems.map((cartItem) => renderCartItem(cartItem)).join('')}
+            </section>
+          `
+          : `
+            <section class="order-panel__empty" aria-label="Empty order">
+              <div>
+                <div class="order-panel__empty-icon" aria-hidden="true"></div>
+                <p class="order-panel__empty-title">Your order is empty</p>
+                <p class="order-panel__empty-copy">
+                  Select an item from the menu to begin this customer’s order.
+                </p>
+              </div>
+            </section>
+          `
+      }
+
+      <footer class="order-panel__footer">
+        <div class="order-panel__summary">
+          <div class="order-summary-row">
+            <span>Subtotal</span>
+            <span class="order-summary-row__value">
+              ${formatShortGhs(subtotal)}
+            </span>
+          </div>
+
+          <div class="order-summary-row">
+            <span>Tax</span>
+            <span class="order-summary-row__value">GH₵ 0.00</span>
+          </div>
+
+          <div class="order-summary-row order-summary-row--total">
+            <span>Total</span>
+            <span class="order-summary-row__value">
+              ${formatShortGhs(subtotal)}
+            </span>
+          </div>
+        </div>
+
+        <button
+          class="order-panel__action"
+          type="button"
+          ${hasItems ? '' : 'disabled'}
+        >
+          Continue to payment
+        </button>
+      </footer>
+    </aside>
+  `
+}
+
+function getProductModifierGroups(product) {
+  return product.modifierGroupIds
+    .map((modifierGroupId) =>
+      modifierGroups.find((group) => group.id === modifierGroupId),
+    )
+    .filter(Boolean)
+}
+
+function renderActiveCustomizationDialog() {
+  if (!posState.activeProductId) {
+    return ''
+  }
+
+  const product = menuItems.find(
+    (menuItem) => menuItem.id === posState.activeProductId,
+  )
+
+  if (!product) {
+    return ''
+  }
+
+  return renderItemCustomizationDialog(
+    product,
+    getProductModifierGroups(product),
+  )
+}
+
 function renderPos() {
+  const visibleProductCount = getVisibleProducts().length
+
   app.innerHTML = `
     <main class="pos-layout">
       <aside class="pos-sidebar" aria-label="Staff POS navigation">
         <div>
           <div class="pos-sidebar__brand" aria-label="Luna Café and Eatery">
-            <span class="pos-sidebar__brand-moon" aria-hidden="true">◒</span>
+            <span class="pos-sidebar__brand-mark" aria-hidden="true">L</span>
             <span>LUNA</span>
           </div>
 
@@ -291,7 +471,7 @@ function renderPos() {
             </span>
 
             <button class="pos-header__button" type="button">
-              ☷ Open orders
+              Open orders
             </button>
           </div>
         </header>
@@ -307,7 +487,7 @@ function renderPos() {
             data-order-type="dine-in"
             aria-pressed="${posState.orderType === 'dine-in'}"
           >
-            🍽️ Dine-in
+            Dine-in
           </button>
 
           <button
@@ -320,7 +500,7 @@ function renderPos() {
             data-order-type="takeaway"
             aria-pressed="${posState.orderType === 'takeaway'}"
           >
-            🥡 Takeaway
+            Takeaway
           </button>
         </div>
 
@@ -331,14 +511,14 @@ function renderPos() {
             <div>
               <h2 class="pos-menu-toolbar__title" id="menu-title">Menu</h2>
               <p class="pos-menu-toolbar__meta">
-                ${getVisibleProducts().length} item${
-                  getVisibleProducts().length === 1 ? '' : 's'
+                ${visibleProductCount} item${
+                  visibleProductCount === 1 ? '' : 's'
                 } available
               </p>
             </div>
 
             <label class="pos-search">
-              <span class="pos-search__icon" aria-hidden="true">⌕</span>
+              <span class="pos-search__icon" aria-hidden="true"></span>
               <input
                 class="pos-search__input"
                 type="search"
@@ -359,60 +539,95 @@ function renderPos() {
         </section>
       </section>
 
-      <aside class="pos-order-panel" aria-labelledby="order-panel-title">
-        <header class="order-panel__header">
-          <div>
-            <p class="order-panel__eyebrow">Current order</p>
-            <h2 class="order-panel__title" id="order-panel-title">Order #Draft</h2>
-          </div>
-
-          <button
-            class="order-panel__icon-button"
-            type="button"
-            aria-label="Clear current order"
-            disabled
-          >
-            ⌫
-          </button>
-        </header>
-
-        <section class="order-panel__empty" aria-label="Empty order">
-          <div>
-            <div class="order-panel__empty-icon" aria-hidden="true">🧋</div>
-            <p class="order-panel__empty-title">Your order is empty</p>
-            <p class="order-panel__empty-copy">
-              Select an item from the menu to begin this customer’s order.
-            </p>
-          </div>
-        </section>
-
-        <footer>
-          <div class="order-panel__summary">
-            <div class="order-summary-row">
-              <span>Subtotal</span>
-              <span class="order-summary-row__value">GH₵ 0.00</span>
-            </div>
-
-            <div class="order-summary-row">
-              <span>Tax</span>
-              <span class="order-summary-row__value">GH₵ 0.00</span>
-            </div>
-
-            <div class="order-summary-row order-summary-row--total">
-              <span>Total</span>
-              <span class="order-summary-row__value">GH₵ 0.00</span>
-            </div>
-          </div>
-
-          <button class="order-panel__action" type="button" disabled>
-            Continue to payment
-          </button>
-        </footer>
-      </aside>
+      ${renderOrderPanel()}
     </main>
+
+    ${renderActiveCustomizationDialog()}
   `
 
   attachPosEventListeners()
+
+  if (posState.activeProductId) {
+    const dialog = document.querySelector('.customization-dialog')
+
+    if (dialog && !dialog.open) {
+      dialog.showModal()
+    }
+  }
+}
+
+function openProductCustomization(productId) {
+  const product = menuItems.find((menuItem) => menuItem.id === productId)
+
+  if (!product || !product.isAvailable) {
+    return
+  }
+
+  const hasMultipleVariants = product.variants.length > 1
+  const hasModifiers = getProductModifierGroups(product).length > 0
+
+  if (!hasMultipleVariants && !hasModifiers) {
+    const cartItem = createCartItem({
+      product,
+      variant: product.variants[0],
+    })
+
+    posState.cartItems = addCartItem(posState.cartItems, cartItem)
+    renderPos()
+    return
+  }
+
+  posState.activeProductId = product.id
+  renderPos()
+}
+
+function closeProductCustomization() {
+  posState.activeProductId = null
+  renderPos()
+}
+
+function addCustomizedProductToCart() {
+  const dialog = document.querySelector('.customization-dialog')
+  const product = menuItems.find(
+    (menuItem) => menuItem.id === posState.activeProductId,
+  )
+
+  if (!dialog || !product) {
+    closeProductCustomization()
+    return
+  }
+
+  const formData = new FormData(dialog.querySelector('form'))
+  const variantId = formData.get('variant') || product.variants[0].id
+
+  const selectedVariant = product.variants.find(
+    (variant) => variant.id === variantId,
+  )
+
+  const selectedModifiers = getProductModifierGroups(product).flatMap(
+    (group) => {
+      const optionIds =
+        group.selectionType === 'multiple'
+          ? formData.getAll(`modifier-${group.id}`)
+          : [formData.get(`modifier-${group.id}`)].filter(Boolean)
+
+      return optionIds
+        .map((optionId) =>
+          group.options.find((option) => option.id === optionId),
+        )
+        .filter(Boolean)
+    },
+  )
+
+  const cartItem = createCartItem({
+    product,
+    variant: selectedVariant,
+    modifiers: selectedModifiers,
+  })
+
+  posState.cartItems = addCartItem(posState.cartItems, cartItem)
+  posState.activeProductId = null
+  renderPos()
 }
 
 function attachPosEventListeners() {
@@ -446,11 +661,79 @@ function attachPosEventListeners() {
     })
   })
 
-  document.querySelectorAll('.product-card__image').forEach((image) => {
-    image.addEventListener('error', () => {
-      handleProductImageError(image, image.dataset.fallbackImage)
+  document.querySelectorAll('[data-product-id]').forEach((button) => {
+    button.addEventListener('click', () => {
+      openProductCustomization(button.dataset.productId)
     })
   })
+
+  document.querySelectorAll('[data-increase-cart-item]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const cartItemId = button.dataset.increaseCartItem
+      const cartItem = posState.cartItems.find(
+        (item) => item.id === cartItemId,
+      )
+
+      if (!cartItem) {
+        return
+      }
+
+      posState.cartItems = updateCartItemQuantity(
+        posState.cartItems,
+        cartItemId,
+        cartItem.quantity + 1,
+      )
+
+      renderPos()
+    })
+  })
+
+  document.querySelectorAll('[data-decrease-cart-item]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const cartItemId = button.dataset.decreaseCartItem
+      const cartItem = posState.cartItems.find(
+        (item) => item.id === cartItemId,
+      )
+
+      if (!cartItem) {
+        return
+      }
+
+      posState.cartItems = updateCartItemQuantity(
+        posState.cartItems,
+        cartItemId,
+        cartItem.quantity - 1,
+      )
+
+      renderPos()
+    })
+  })
+
+  document.querySelector('[data-clear-order]')?.addEventListener('click', () => {
+    posState.cartItems = []
+    renderPos()
+  })
+
+  document.querySelectorAll('[data-close-customization]').forEach((button) => {
+    button.addEventListener('click', () => {
+      closeProductCustomization()
+    })
+  })
+
+  document
+    .querySelector('[data-add-customized-item]')
+    ?.addEventListener('click', (event) => {
+      event.preventDefault()
+      addCustomizedProductToCart()
+    })
+
+  document.querySelectorAll('.product-card__image, .cart-item__image').forEach(
+    (image) => {
+      image.addEventListener('error', () => {
+        handleProductImageError(image, image.dataset.fallbackImage)
+      })
+    },
+  )
 }
 
 function renderPlaceholder(appName) {
