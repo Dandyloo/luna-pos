@@ -936,6 +936,19 @@
   line-height: 1.4;
 }
 
+.order-save-error {
+  flex: 0 0 auto;
+  margin: var(--space-3) 0 0;
+  padding: var(--space-3);
+  border: 1px solid rgb(200 42 24 / 0.2);
+  border-radius: var(--radius-sm);
+  background: rgb(200 42 24 / 0.08);
+  color: var(--color-danger);
+  font-size: 0.78rem;
+  font-weight: 800;
+  line-height: 1.45;
+}
+
 .order-panel__footer {
   flex: 0 0 auto;
   padding-top: var(--space-5);

@@ -20,6 +20,11 @@ import {
   updateCartItemQuantity,
 } from './utils/order-utils.js'
 import { getCategoryById, handleProductImageError } from './utils/product-utils.js'
+import {
+  getAllOrders,
+  getOrderCount,
+  saveOrder,
+} from './services/order-repository.js'
 
 const app = document.querySelector('#app')
 
@@ -96,6 +101,9 @@ const posState = {
   cashReceived: '',
   paymentError: '',
   lastSubmittedOrder: null,
+  savedOrderCount: 0,
+  isSavingOrder: false,
+  saveOrderError: '',
 }
 
 function escapeHtml(value) {
@@ -344,7 +352,7 @@ function renderAdjustments(totals, hasItems) {
             data-toggle-tax
             aria-label="Toggle tax"
             aria-pressed="${posState.isTaxEnabled}"
-            ${hasItems ? '' : 'disabled'}
+            ${hasItems && !posState.isSavingOrder ? '' : 'disabled'}
           ></button>
         </div>
 
@@ -367,7 +375,7 @@ function renderAdjustments(totals, hasItems) {
             data-toggle-discount
             aria-label="Toggle discount"
             aria-pressed="${posState.isDiscountEnabled}"
-            ${hasItems ? '' : 'disabled'}
+            ${hasItems && !posState.isSavingOrder ? '' : 'disabled'}
           ></button>
         </div>
 
@@ -380,7 +388,11 @@ function renderAdjustments(totals, hasItems) {
             class="adjustment-select"
             data-discount-type
             aria-label="Discount type"
-            ${posState.isDiscountEnabled && hasItems ? '' : 'disabled'}
+            ${
+              posState.isDiscountEnabled && hasItems && !posState.isSavingOrder
+                ? ''
+                : 'disabled'
+            }
           >
             <option value="percentage" ${
               posState.discountType === 'percentage' ? 'selected' : ''
@@ -409,7 +421,11 @@ function renderAdjustments(totals, hasItems) {
             value="${escapeHtml(posState.discountValue)}"
             data-discount-value
             aria-label="Discount value"
-            ${posState.isDiscountEnabled && hasItems ? '' : 'disabled'}
+            ${
+              posState.isDiscountEnabled && hasItems && !posState.isSavingOrder
+                ? ''
+                : 'disabled'
+            }
           />
         </div>
 
@@ -438,6 +454,7 @@ function renderOrderPanel() {
   const totals = getOrderTotals()
   const cartQuantity = getCartQuantity(posState.cartItems)
   const hasItems = posState.cartItems.length > 0
+  const isDisabled = !hasItems || posState.isSavingOrder
 
   return `
     <aside class="pos-order-panel" aria-labelledby="order-panel-title">
@@ -452,7 +469,7 @@ function renderOrderPanel() {
           type="button"
           data-clear-order
           aria-label="Clear current order"
-          ${hasItems ? '' : 'disabled'}
+          ${isDisabled ? 'disabled' : ''}
         >
           ×
         </button>
@@ -482,6 +499,16 @@ function renderOrderPanel() {
       }
 
       ${renderAdjustments(totals, hasItems)}
+
+      ${
+        posState.saveOrderError
+          ? `
+            <p class="order-save-error" role="alert">
+              ${escapeHtml(posState.saveOrderError)}
+            </p>
+          `
+          : ''
+      }
 
       <footer class="order-panel__footer">
         <div class="order-panel__summary">
@@ -523,7 +550,7 @@ function renderOrderPanel() {
             class="order-panel__action"
             type="button"
             data-open-payment
-            ${hasItems ? '' : 'disabled'}
+            ${isDisabled ? 'disabled' : ''}
           >
             Take payment
           </button>
@@ -532,9 +559,13 @@ function renderOrderPanel() {
             class="order-panel__action order-panel__action--secondary"
             type="button"
             data-send-to-preparation
-            ${hasItems ? '' : 'disabled'}
+            ${isDisabled ? 'disabled' : ''}
           >
-            Send to preparation
+            ${
+              posState.isSavingOrder
+                ? 'Saving order...'
+                : 'Send to preparation'
+            }
           </button>
         </div>
       </footer>
@@ -606,17 +637,13 @@ function renderOrderConfirmation() {
       </p>
 
       <h2 class="order-confirmed__title">
-        Order ${order.orderNumber} sent to preparation
+        Order ${order.orderNumber} saved locally
       </h2>
 
       <p class="order-confirmed__copy">
         ${order.itemCount} item${order.itemCount === 1 ? '' : 's'} ·
         ${formatShortGhs(order.total)} ·
-        ${
-          isPaid
-            ? getPaymentMethodLabel(order.paymentMethod)
-            : 'Unpaid'
-        } ·
+        ${isPaid ? getPaymentMethodLabel(order.paymentMethod) : 'Unpaid'} ·
         ${getFulfilmentStatusLabel(order.fulfilmentStatus)}
       </p>
 
@@ -684,13 +711,15 @@ function renderPos() {
           </div>
 
           <div class="pos-header__actions">
-            <span class="connection-status" title="Cloud sync is not configured yet">
+            <span class="connection-status" title="Orders are currently stored only on this device">
               <span class="connection-status__dot" aria-hidden="true"></span>
               Local mode
             </span>
 
             <button class="pos-header__button" type="button">
-              Open orders
+              ${posState.savedOrderCount} saved order${
+                posState.savedOrderCount === 1 ? '' : 's'
+              }
             </button>
           </div>
         </header>
@@ -705,6 +734,7 @@ function renderPos() {
             type="button"
             data-order-type="dine-in"
             aria-pressed="${posState.orderType === 'dine-in'}"
+            ${posState.isSavingOrder ? 'disabled' : ''}
           >
             Dine-in
           </button>
@@ -718,6 +748,7 @@ function renderPos() {
             type="button"
             data-order-type="takeaway"
             aria-pressed="${posState.orderType === 'takeaway'}"
+            ${posState.isSavingOrder ? 'disabled' : ''}
           >
             Takeaway
           </button>
@@ -747,6 +778,7 @@ function renderPos() {
                 autocomplete="off"
                 autocapitalize="none"
                 spellcheck="false"
+                ${posState.isSavingOrder ? 'disabled' : ''}
               />
             </label>
           </div>
@@ -947,7 +979,9 @@ function attachCartImageFallbacks() {
 function attachProductCardListeners() {
   document.querySelectorAll('[data-product-id]').forEach((button) => {
     button.addEventListener('click', () => {
-      openProductCustomization(button.dataset.productId)
+      if (!posState.isSavingOrder) {
+        openProductCustomization(button.dataset.productId)
+      }
     })
   })
 }
@@ -955,7 +989,7 @@ function attachProductCardListeners() {
 function openProductCustomization(productId) {
   const product = menuItems.find((menuItem) => menuItem.id === productId)
 
-  if (!product || !product.isAvailable) {
+  if (!product || !product.isAvailable || posState.isSavingOrder) {
     return
   }
 
@@ -1120,23 +1154,43 @@ function resetDraftOrder() {
   posState.paymentMethod = 'cash'
   posState.cashReceived = ''
   posState.paymentError = ''
+  posState.saveOrderError = ''
 }
 
-function sendOrderToPreparation() {
-  if (posState.cartItems.length === 0) {
+async function persistSubmittedOrder(order) {
+  posState.isSavingOrder = true
+  posState.saveOrderError = ''
+  renderPos()
+
+  try {
+    await saveOrder(order)
+    posState.savedOrderCount = await getOrderCount()
+    posState.lastSubmittedOrder = order
+    resetDraftOrder()
+  } catch (error) {
+    console.error('Failed to save order locally:', error)
+    posState.saveOrderError =
+      'Order was not saved. Please try again before clearing this order.'
+  } finally {
+    posState.isSavingOrder = false
+    renderPos()
+  }
+}
+
+async function sendOrderToPreparation() {
+  if (posState.cartItems.length === 0 || posState.isSavingOrder) {
     return
   }
 
-  posState.lastSubmittedOrder = createOrderSnapshot({
+  const order = createOrderSnapshot({
     paymentStatus: 'UNPAID',
   })
 
-  resetDraftOrder()
-  renderPos()
+  await persistSubmittedOrder(order)
 }
 
 function openPaymentDialog() {
-  if (posState.cartItems.length === 0) {
+  if (posState.cartItems.length === 0 || posState.isSavingOrder) {
     return
   }
 
@@ -1148,6 +1202,10 @@ function openPaymentDialog() {
 }
 
 function closePaymentDialog() {
+  if (posState.isSavingOrder) {
+    return
+  }
+
   posState.isPaymentDialogOpen = false
   posState.paymentError = ''
   renderPos()
@@ -1173,7 +1231,11 @@ function validatePayment() {
   return ''
 }
 
-function completeCurrentPayment() {
+async function completeCurrentPayment() {
+  if (posState.isSavingOrder) {
+    return
+  }
+
   const paymentError = validatePayment()
 
   if (paymentError) {
@@ -1182,7 +1244,7 @@ function completeCurrentPayment() {
     return
   }
 
-  posState.lastSubmittedOrder = createOrderSnapshot({
+  const order = createOrderSnapshot({
     paymentStatus: 'PAID',
     paymentMethod: posState.paymentMethod,
     cashReceived:
@@ -1191,13 +1253,37 @@ function completeCurrentPayment() {
         : null,
   })
 
-  resetDraftOrder()
-  renderPos()
+  await persistSubmittedOrder(order)
 }
 
 function startNewOrder() {
   posState.lastSubmittedOrder = null
   renderPos()
+}
+
+async function refreshSavedOrderCount() {
+  try {
+    posState.savedOrderCount = await getOrderCount()
+  } catch (error) {
+    console.error('Failed to read locally saved order count:', error)
+  }
+}
+
+async function logSavedOrdersForDevelopment() {
+  try {
+    const orders = await getAllOrders()
+    console.table(
+      orders.map((order) => ({
+        orderNumber: order.orderNumber,
+        paymentStatus: order.paymentStatus,
+        fulfilmentStatus: order.fulfilmentStatus,
+        total: order.total,
+        createdAt: order.createdAt,
+      })),
+    )
+  } catch (error) {
+    console.error('Failed to read locally saved orders:', error)
+  }
 }
 
 function attachPosEventListeners() {
@@ -1242,7 +1328,7 @@ function attachPosEventListeners() {
         (item) => item.id === cartItemId,
       )
 
-      if (!cartItem) {
+      if (!cartItem || posState.isSavingOrder) {
         return
       }
 
@@ -1264,7 +1350,7 @@ function attachPosEventListeners() {
         (item) => item.id === cartItemId,
       )
 
-      if (!cartItem) {
+      if (!cartItem || posState.isSavingOrder) {
         return
       }
 
@@ -1280,29 +1366,37 @@ function attachPosEventListeners() {
   })
 
   document.querySelector('[data-clear-order]')?.addEventListener('click', () => {
-    resetDraftOrder()
-    renderPos()
+    if (!posState.isSavingOrder) {
+      resetDraftOrder()
+      renderPos()
+    }
   })
 
   document.querySelector('[data-toggle-tax]')?.addEventListener('click', () => {
-    posState.isTaxEnabled = !posState.isTaxEnabled
-    renderPos()
+    if (!posState.isSavingOrder) {
+      posState.isTaxEnabled = !posState.isTaxEnabled
+      renderPos()
+    }
   })
 
   document
     .querySelector('[data-toggle-discount]')
     ?.addEventListener('click', () => {
-      posState.isDiscountEnabled = !posState.isDiscountEnabled
-      posState.discountError = validateDiscountValue(posState.discountValue)
-      renderPos()
+      if (!posState.isSavingOrder) {
+        posState.isDiscountEnabled = !posState.isDiscountEnabled
+        posState.discountError = validateDiscountValue(posState.discountValue)
+        renderPos()
+      }
     })
 
   document
     .querySelector('[data-discount-type]')
     ?.addEventListener('change', (event) => {
-      posState.discountType = event.target.value
-      posState.discountError = validateDiscountValue(posState.discountValue)
-      renderPos()
+      if (!posState.isSavingOrder) {
+        posState.discountType = event.target.value
+        posState.discountError = validateDiscountValue(posState.discountValue)
+        renderPos()
+      }
     })
 
   document
@@ -1342,9 +1436,11 @@ function attachPosEventListeners() {
 
   document.querySelectorAll('input[name="payment-method"]').forEach((input) => {
     input.addEventListener('change', (event) => {
-      posState.paymentMethod = event.target.value
-      posState.paymentError = ''
-      renderPos()
+      if (!posState.isSavingOrder) {
+        posState.paymentMethod = event.target.value
+        posState.paymentError = ''
+        renderPos()
+      }
     })
   })
 
@@ -1409,7 +1505,7 @@ function renderPlaceholder(appName) {
   `
 }
 
-function renderApp() {
+async function renderApp() {
   const currentApp = getCurrentApp()
 
   if (currentApp === 'launcher') {
@@ -1418,7 +1514,9 @@ function renderApp() {
   }
 
   if (currentApp === 'pos') {
+    await refreshSavedOrderCount()
     renderPos()
+    await logSavedOrdersForDevelopment()
     return
   }
 
