@@ -24,6 +24,7 @@ import { getCategoryById, handleProductImageError } from './utils/product-utils.
 const app = document.querySelector('#app')
 
 const DEMO_TAX_RATE = 0.15
+const CURRENT_DEVICE_NAME = 'Counter Tablet 1'
 
 const applicationCards = [
   {
@@ -94,7 +95,7 @@ const posState = {
   paymentMethod: 'cash',
   cashReceived: '',
   paymentError: '',
-  lastCompletedOrder: null,
+  lastSubmittedOrder: null,
 }
 
 function escapeHtml(value) {
@@ -517,14 +518,25 @@ function renderOrderPanel() {
           </div>
         </div>
 
-        <button
-          class="order-panel__action"
-          type="button"
-          data-open-payment
-          ${hasItems ? '' : 'disabled'}
-        >
-          Continue to payment
-        </button>
+        <div class="order-panel__actions">
+          <button
+            class="order-panel__action"
+            type="button"
+            data-open-payment
+            ${hasItems ? '' : 'disabled'}
+          >
+            Take payment
+          </button>
+
+          <button
+            class="order-panel__action order-panel__action--secondary"
+            type="button"
+            data-send-to-preparation
+            ${hasItems ? '' : 'disabled'}
+          >
+            Send to preparation
+          </button>
+        </div>
       </footer>
     </aside>
   `
@@ -557,22 +569,57 @@ function renderActiveCustomizationDialog() {
   )
 }
 
+function getPaymentMethodLabel(paymentMethod) {
+  const labels = {
+    cash: 'Cash',
+    momo: 'Mobile Money',
+    card: 'Card',
+  }
+
+  return labels[paymentMethod] || 'Payment'
+}
+
+function getFulfilmentStatusLabel(fulfilmentStatus) {
+  const labels = {
+    PLACED: 'Placed',
+    PREPARING: 'Preparing',
+    READY: 'Ready',
+    COMPLETED: 'Completed',
+    CANCELLED: 'Cancelled',
+  }
+
+  return labels[fulfilmentStatus] || fulfilmentStatus
+}
+
 function renderOrderConfirmation() {
-  if (!posState.lastCompletedOrder) {
+  if (!posState.lastSubmittedOrder) {
     return ''
   }
 
-  const order = posState.lastCompletedOrder
+  const order = posState.lastSubmittedOrder
+  const isPaid = order.paymentStatus === 'PAID'
 
   return `
     <section class="order-confirmed" role="status" aria-live="polite">
-      <p class="order-confirmed__eyebrow">Payment confirmed</p>
-      <h2 class="order-confirmed__title">Order ${order.orderNumber} is complete</h2>
+      <p class="order-confirmed__eyebrow">
+        ${isPaid ? 'Payment received' : 'Payment pending'}
+      </p>
+
+      <h2 class="order-confirmed__title">
+        Order ${order.orderNumber} sent to preparation
+      </h2>
+
       <p class="order-confirmed__copy">
         ${order.itemCount} item${order.itemCount === 1 ? '' : 's'} ·
         ${formatShortGhs(order.total)} ·
-        ${getPaymentMethodLabel(order.paymentMethod)}
+        ${
+          isPaid
+            ? getPaymentMethodLabel(order.paymentMethod)
+            : 'Unpaid'
+        } ·
+        ${getFulfilmentStatusLabel(order.fulfilmentStatus)}
       </p>
+
       <button class="order-confirmed__button" type="button" data-start-new-order>
         Start new order
       </button>
@@ -619,7 +666,7 @@ function renderPos() {
         <div class="pos-sidebar__footer">
           <section class="pos-sidebar__device" aria-label="Current device">
             <p class="pos-sidebar__device-label">Current device</p>
-            <p class="pos-sidebar__device-name">Counter Tablet 1</p>
+            <p class="pos-sidebar__device-name">${CURRENT_DEVICE_NAME}</p>
           </section>
 
           <a class="pos-sidebar__back-link" href="${getAppUrl('launcher')}">
@@ -632,7 +679,7 @@ function renderPos() {
       <section class="pos-workspace" aria-labelledby="pos-title">
         <header class="pos-header">
           <div>
-            <p class="pos-header__eyebrow">Counter Tablet 1</p>
+            <p class="pos-header__eyebrow">${CURRENT_DEVICE_NAME}</p>
             <h1 class="pos-header__title" id="pos-title">New order</h1>
           </div>
 
@@ -1009,14 +1056,83 @@ function updateDiscountValue(value) {
   updateFinancialDisplay()
 }
 
-function getPaymentMethodLabel(paymentMethod) {
-  const labels = {
-    cash: 'Cash',
-    momo: 'Mobile Money',
-    card: 'Card',
+function createOrderSnapshot({
+  paymentStatus,
+  paymentMethod = null,
+  cashReceived = null,
+}) {
+  const totals = getOrderTotals()
+  const now = new Date()
+  const itemCount = getCartQuantity(posState.cartItems)
+
+  return {
+    id: crypto.randomUUID(),
+    orderNumber: `LUNA-${String(Date.now()).slice(-6)}`,
+    orderType: posState.orderType,
+    paymentStatus,
+    fulfilmentStatus: 'PREPARING',
+    status: 'OPEN',
+    items: structuredClone(posState.cartItems),
+    subtotal: totals.subtotal,
+    discount: {
+      isEnabled: posState.isDiscountEnabled,
+      type: posState.isDiscountEnabled ? posState.discountType : null,
+      inputValue: posState.isDiscountEnabled ? posState.discountValue : null,
+      amount: totals.discountAmount,
+    },
+    tax: {
+      isEnabled: posState.isTaxEnabled,
+      rate: posState.isTaxEnabled ? DEMO_TAX_RATE : 0,
+      amount: totals.taxAmount,
+    },
+    total: totals.total,
+    payments:
+      paymentStatus === 'PAID'
+        ? [
+            {
+              id: crypto.randomUUID(),
+              method: paymentMethod,
+              amount: totals.total,
+              cashReceived,
+              change:
+                paymentMethod === 'cash'
+                  ? Number((cashReceived - totals.total).toFixed(2))
+                  : 0,
+              recordedAt: now.toISOString(),
+            },
+          ]
+        : [],
+    sourceDevice: CURRENT_DEVICE_NAME,
+    createdAt: now.toISOString(),
+    updatedAt: now.toISOString(),
+    itemCount,
+  }
+}
+
+function resetDraftOrder() {
+  posState.cartItems = []
+  posState.isTaxEnabled = false
+  posState.isDiscountEnabled = false
+  posState.discountType = 'percentage'
+  posState.discountValue = ''
+  posState.discountError = ''
+  posState.isPaymentDialogOpen = false
+  posState.paymentMethod = 'cash'
+  posState.cashReceived = ''
+  posState.paymentError = ''
+}
+
+function sendOrderToPreparation() {
+  if (posState.cartItems.length === 0) {
+    return
   }
 
-  return labels[paymentMethod] || 'Payment'
+  posState.lastSubmittedOrder = createOrderSnapshot({
+    paymentStatus: 'UNPAID',
+  })
+
+  resetDraftOrder()
+  renderPos()
 }
 
 function openPaymentDialog() {
@@ -1057,7 +1173,7 @@ function validatePayment() {
   return ''
 }
 
-function completeCurrentOrder() {
+function completeCurrentPayment() {
   const paymentError = validatePayment()
 
   if (paymentError) {
@@ -1066,49 +1182,21 @@ function completeCurrentOrder() {
     return
   }
 
-  const totals = getOrderTotals()
-  const completedAt = new Date()
-  const itemCount = getCartQuantity(posState.cartItems)
-
-  posState.lastCompletedOrder = {
-    id: crypto.randomUUID(),
-    orderNumber: `LUNA-${String(Date.now()).slice(-6)}`,
-    orderType: posState.orderType,
-    cartItems: structuredClone(posState.cartItems),
-    subtotal: totals.subtotal,
-    discountAmount: totals.discountAmount,
-    taxAmount: totals.taxAmount,
-    total: totals.total,
+  posState.lastSubmittedOrder = createOrderSnapshot({
+    paymentStatus: 'PAID',
     paymentMethod: posState.paymentMethod,
     cashReceived:
       posState.paymentMethod === 'cash'
         ? Number(posState.cashReceived)
         : null,
-    change:
-      posState.paymentMethod === 'cash'
-        ? Number((Number(posState.cashReceived) - totals.total).toFixed(2))
-        : 0,
-    status: 'PAID',
-    completedAt: completedAt.toISOString(),
-    itemCount,
-  }
+  })
 
-  posState.cartItems = []
-  posState.isTaxEnabled = false
-  posState.isDiscountEnabled = false
-  posState.discountType = 'percentage'
-  posState.discountValue = ''
-  posState.discountError = ''
-  posState.isPaymentDialogOpen = false
-  posState.paymentMethod = 'cash'
-  posState.cashReceived = ''
-  posState.paymentError = ''
-
+  resetDraftOrder()
   renderPos()
 }
 
 function startNewOrder() {
-  posState.lastCompletedOrder = null
+  posState.lastSubmittedOrder = null
   renderPos()
 }
 
@@ -1192,11 +1280,7 @@ function attachPosEventListeners() {
   })
 
   document.querySelector('[data-clear-order]')?.addEventListener('click', () => {
-    posState.cartItems = []
-    posState.isTaxEnabled = false
-    posState.isDiscountEnabled = false
-    posState.discountValue = ''
-    posState.discountError = ''
+    resetDraftOrder()
     renderPos()
   })
 
@@ -1244,6 +1328,12 @@ function attachPosEventListeners() {
     openPaymentDialog()
   })
 
+  document
+    .querySelector('[data-send-to-preparation]')
+    ?.addEventListener('click', () => {
+      sendOrderToPreparation()
+    })
+
   document.querySelectorAll('[data-close-payment]').forEach((button) => {
     button.addEventListener('click', () => {
       closePaymentDialog()
@@ -1270,7 +1360,7 @@ function attachPosEventListeners() {
     .querySelector('[data-confirm-payment]')
     ?.addEventListener('click', (event) => {
       event.preventDefault()
-      completeCurrentOrder()
+      completeCurrentPayment()
     })
 
   document
