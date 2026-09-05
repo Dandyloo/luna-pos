@@ -4,6 +4,7 @@ import "./styles/launcher.css";
 import "./styles/orders.css";
 import "./styles/pos.css";
 import "./styles/receipt.css";
+import './styles/customer-display.css'
 
 import { renderItemCustomizationDialog } from "./components/item-customization-dialog.js";
 import {
@@ -2043,6 +2044,83 @@ function attachPosEventListeners() {
     });
 }
 
+function renderCustomerDisplay() {
+  app.innerHTML = `
+    <main class="customer-display" aria-label="Luna customer display">
+      <section class="customer-display__frame">
+        <header class="customer-display__header">
+          <div class="customer-display__brand">
+            <span class="customer-display__brand-mark" aria-hidden="true">L</span>
+
+            <div>
+              <p class="customer-display__brand-name">LUNA</p>
+              <p class="customer-display__brand-subtitle">Café & Eatery</p>
+            </div>
+          </div>
+
+          <span class="customer-display__connection">
+            <span class="customer-display__connection-dot" aria-hidden="true"></span>
+            Waiting for counter
+          </span>
+        </header>
+
+        <section class="customer-display__content">
+          <section class="customer-display__welcome" aria-labelledby="customer-display-title">
+            <p class="customer-display__eyebrow">Welcome to Luna Café & Eatery</p>
+
+            <h1 class="customer-display__title" id="customer-display-title">
+              Taste the
+              <span class="customer-display__title-accent">Luna</span>
+              delight.
+            </h1>
+
+            <p class="customer-display__copy">
+              Your order will appear here while our team prepares something delicious for you.
+            </p>
+
+            <section class="customer-display__waiting-card" aria-label="Counter connection status">
+              <div class="customer-display__waiting-mark" aria-hidden="true"></div>
+
+              <div>
+                <h2 class="customer-display__waiting-title">
+                  Ready when you are
+                </h2>
+
+                <p class="customer-display__waiting-copy">
+                  Please place your order with the Luna counter team. You can review your items and total here.
+                </p>
+              </div>
+            </section>
+          </section>
+
+          <aside class="customer-display__promo" aria-label="Luna promotion">
+            <div class="customer-display__promo-card">
+              <div class="customer-display__promo-orbit" aria-hidden="true">
+                <div class="customer-display__promo-drink"></div>
+              </div>
+
+              <p class="customer-display__promo-label">Luna Boba</p>
+
+              <h2 class="customer-display__promo-title">
+                Sip something special.
+              </h2>
+
+              <p class="customer-display__promo-copy">
+                Discover creamy milk teas, fruit teas, signature boba, and matcha favourites.
+              </p>
+            </div>
+          </aside>
+        </section>
+
+        <footer class="customer-display__footer">
+          <span>Pedu GOIL Filling Station, Cape Coast</span>
+          <strong>059 367 6875 · @Lunacafegh</strong>
+        </footer>
+      </section>
+    </main>
+  `
+}
+
 function renderPlaceholder(appName) {
   const pageDetails = {
     "customer-display": {
@@ -2090,10 +2168,15 @@ async function renderApp() {
     return;
   }
 
-  if (currentApp === "pos") {
-    await refreshSavedOrderCount();
-    renderPos();
-    return;
+    if (currentApp === 'pos') {
+    await refreshSavedOrderCount()
+    renderPos()
+    return
+  }
+
+  if (currentApp === 'customer-display') {
+    renderCustomerDisplay()
+    return
   }
 
   renderPlaceholder(currentApp);
