@@ -155,6 +155,16 @@ export function renderOrderDetails(order) {
         </div>
       </section>
 
+      <section class="order-details__receipt-action">
+        <button
+          class="button button--secondary button--full"
+          type="button"
+          data-view-receipt="${order.id}"
+        >
+          View receipt
+        </button>
+      </section>
+
       ${renderOrderActions(order)}
 
       <section class="order-details__section">
