@@ -38,7 +38,7 @@ export function initializeCustomerDisplayChannel({ getCurrentDraft } = {}) {
   return true
 }
 
-export function publishCustomerDraft(draft) {
+export function publishCustomerDisplayMessage(type, payload = null) {
   const activeChannel = getChannel()
 
   if (!activeChannel) {
@@ -46,11 +46,27 @@ export function publishCustomerDraft(draft) {
   }
 
   activeChannel.postMessage({
-    type: 'ACTIVE_DRAFT',
-    payload: draft,
+    type,
+    payload,
   })
 
   return true
+}
+
+export function publishCustomerDraft(draft) {
+  return publishCustomerDisplayMessage('ACTIVE_DRAFT', draft)
+}
+
+export function publishSubmittedOrder(order) {
+  return publishCustomerDisplayMessage('ORDER_SUBMITTED', order)
+}
+
+export function publishReadyOrder(order) {
+  return publishCustomerDisplayMessage('ORDER_READY', order)
+}
+
+export function clearCustomerDisplay() {
+  return publishCustomerDisplayMessage('CLEAR_DISPLAY')
 }
 
 export function requestActiveCustomerDraft() {
@@ -67,7 +83,7 @@ export function requestActiveCustomerDraft() {
   return true
 }
 
-export function subscribeToCustomerDrafts(callback) {
+export function subscribeToCustomerDisplayMessages(callback) {
   const activeChannel = getChannel()
 
   if (!activeChannel) {
@@ -77,8 +93,13 @@ export function subscribeToCustomerDrafts(callback) {
   const handleMessage = (event) => {
     const message = event.data
 
-    if (message?.type === 'ACTIVE_DRAFT') {
-      callback(message.payload || null)
+    if (
+      message?.type === 'ACTIVE_DRAFT' ||
+      message?.type === 'ORDER_SUBMITTED' ||
+      message?.type === 'ORDER_READY' ||
+      message?.type === 'CLEAR_DISPLAY'
+    ) {
+      callback(message)
     }
   }
 

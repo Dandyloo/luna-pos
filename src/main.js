@@ -6,6 +6,7 @@ import './styles/pos.css'
 import './styles/receipt.css'
 import './styles/customer-display.css'
 
+import { renderCustomerOrderStatus } from './components/customer-order-status.js'
 import { renderCustomerOrderView } from './components/customer-order-view.js'
 import { renderItemCustomizationDialog } from './components/item-customization-dialog.js'
 import { renderOrderCard, renderOrdersEmptyState } from './components/order-card.js'
@@ -13,10 +14,13 @@ import { renderOrderDetails } from './components/order-details.js'
 import { renderPaymentDialog } from './components/payment-dialog.js'
 import { renderNoProductsState, renderProductCard } from './components/product-card.js'
 import {
+  clearCustomerDisplay,
   initializeCustomerDisplayChannel,
   publishCustomerDraft,
+  publishReadyOrder,
+  publishSubmittedOrder,
   requestActiveCustomerDraft,
-  subscribeToCustomerDrafts,
+  subscribeToCustomerDisplayMessages,
 } from './services/customer-display-channel.js'
 import { categories, menuItems, modifierGroups } from './data/menu-data.js'
 import { calculateOrderTotals } from './utils/financial-utils.js'
@@ -43,8 +47,10 @@ const app = document.querySelector('#app')
 
 const DEMO_TAX_RATE = 0.15
 const CURRENT_DEVICE_NAME = 'Counter Tablet 1'
+const CUSTOMER_DISPLAY_STATUS_DURATION = 12_000
 
-let unsubscribeFromCustomerDrafts = null
+let unsubscribeFromCustomerDisplayMessages = null
+let customerDisplayTimeoutId = null
 
 const applicationCards = [
   {
@@ -142,7 +148,9 @@ const posState = {
 }
 
 const customerDisplayState = {
+  mode: 'idle',
   activeDraft: null,
+  activeOrder: null,
   isConnected: false,
 }
 
@@ -1116,8 +1124,20 @@ function renderPos() {
 }
 
 function renderCustomerDisplay() {
-  if (customerDisplayState.activeDraft) {
+  if (customerDisplayState.mode === 'draft' && customerDisplayState.activeDraft) {
     app.innerHTML = renderCustomerOrderView(customerDisplayState.activeDraft)
+    return
+  }
+
+  if (
+    (customerDisplayState.mode === 'submitted' ||
+      customerDisplayState.mode === 'ready') &&
+    customerDisplayState.activeOrder
+  ) {
+    app.innerHTML = renderCustomerOrderStatus({
+      stateType: customerDisplayState.mode,
+      order: customerDisplayState.activeOrder,
+    })
     return
   }
 
@@ -1195,6 +1215,62 @@ function renderCustomerDisplay() {
       </section>
     </main>
   `
+}
+
+function scheduleCustomerDisplayIdle() {
+  window.clearTimeout(customerDisplayTimeoutId)
+
+  customerDisplayTimeoutId = window.setTimeout(() => {
+    customerDisplayState.mode = 'idle'
+    customerDisplayState.activeDraft = null
+    customerDisplayState.activeOrder = null
+    renderCustomerDisplay()
+  }, CUSTOMER_DISPLAY_STATUS_DURATION)
+}
+
+function handleCustomerDisplayMessage(message) {
+  customerDisplayState.isConnected = true
+  window.clearTimeout(customerDisplayTimeoutId)
+
+  if (message.type === 'ACTIVE_DRAFT') {
+    if (message.payload) {
+      customerDisplayState.mode = 'draft'
+      customerDisplayState.activeDraft = message.payload
+      customerDisplayState.activeOrder = null
+    } else {
+      customerDisplayState.mode = 'idle'
+      customerDisplayState.activeDraft = null
+      customerDisplayState.activeOrder = null
+    }
+
+    renderCustomerDisplay()
+    return
+  }
+
+  if (message.type === 'ORDER_SUBMITTED' && message.payload) {
+    customerDisplayState.mode = 'submitted'
+    customerDisplayState.activeDraft = null
+    customerDisplayState.activeOrder = message.payload
+    renderCustomerDisplay()
+    scheduleCustomerDisplayIdle()
+    return
+  }
+
+  if (message.type === 'ORDER_READY' && message.payload) {
+    customerDisplayState.mode = 'ready'
+    customerDisplayState.activeDraft = null
+    customerDisplayState.activeOrder = message.payload
+    renderCustomerDisplay()
+    scheduleCustomerDisplayIdle()
+    return
+  }
+
+  if (message.type === 'CLEAR_DISPLAY') {
+    customerDisplayState.mode = 'idle'
+    customerDisplayState.activeDraft = null
+    customerDisplayState.activeOrder = null
+    renderCustomerDisplay()
+  }
 }
 
 function updateProductsArea() {
@@ -1547,7 +1623,7 @@ async function persistSubmittedOrder(order) {
     posState.savedOrderCount = await getOrderCount()
     posState.lastSubmittedOrder = order
     resetDraftOrder()
-    publishCurrentCustomerDraft()
+    publishSubmittedOrder(order)
   } catch (error) {
     console.error('Failed to save order locally:', error)
     posState.saveOrderError =
@@ -1710,12 +1786,15 @@ async function markOrderReady(orderId) {
 
   const now = new Date().toISOString()
 
-  await updateExistingOrder({
+  const updatedOrder = {
     ...order,
     fulfilmentStatus: 'READY',
     readyAt: now,
     updatedAt: now,
-  })
+  }
+
+  await updateExistingOrder(updatedOrder)
+  publishReadyOrder(updatedOrder)
 }
 
 async function completePaidOrderHandover(orderId) {
@@ -1859,6 +1938,7 @@ function startNewOrder() {
   posState.lastSubmittedOrder = null
   posState.activeView = 'new-order'
   renderPos()
+  clearCustomerDisplay()
 }
 
 async function refreshSavedOrderCount() {
@@ -2226,13 +2306,11 @@ async function renderApp() {
   if (currentApp === 'customer-display') {
     customerDisplayState.isConnected = initializeCustomerDisplayChannel()
 
-    unsubscribeFromCustomerDrafts?.()
+    unsubscribeFromCustomerDisplayMessages?.()
 
-    unsubscribeFromCustomerDrafts = subscribeToCustomerDrafts((draft) => {
-      customerDisplayState.activeDraft = draft
-      customerDisplayState.isConnected = true
-      renderCustomerDisplay()
-    })
+    unsubscribeFromCustomerDisplayMessages = subscribeToCustomerDisplayMessages(
+      handleCustomerDisplayMessage,
+    )
 
     renderCustomerDisplay()
     requestActiveCustomerDraft()
