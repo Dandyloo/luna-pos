@@ -354,3 +354,183 @@
     padding: var(--space-8) var(--space-6);
   }
 }
+
+.customer-display__connection--connected {
+  border-color: rgb(33 135 57 / 0.45);
+  background: rgb(33 135 57 / 0.12);
+  color: #b9f5c5;
+}
+
+.customer-display__connection--connected .customer-display__connection-dot {
+  background: #67e080;
+  box-shadow: 0 0 0 0.25rem rgb(103 224 128 / 0.16);
+}
+
+.customer-order {
+  display: grid;
+  min-height: 0;
+  grid-template-rows: auto minmax(0, 1fr) auto auto;
+  padding: clamp(var(--space-5), 4vw, var(--space-10));
+  overflow: hidden;
+  background:
+    linear-gradient(135deg, rgb(253 147 3 / 0.1), transparent 40%),
+    var(--color-page);
+  color: var(--color-brand-black);
+}
+
+.customer-order__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding-bottom: var(--space-5);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.customer-order__eyebrow {
+  margin: 0;
+  color: var(--color-warning);
+  font-size: clamp(0.72rem, 1.3vw, 0.9rem);
+  font-weight: 950;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.customer-order__title {
+  margin: var(--space-2) 0 0;
+  color: var(--color-brand-black);
+  font-family: var(--font-display);
+  font-size: clamp(1.8rem, 4vw, 3.2rem);
+  letter-spacing: -0.06em;
+  line-height: 0.95;
+}
+
+.customer-order__type {
+  flex: 0 0 auto;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid rgb(15 12 12 / 0.12);
+  border-radius: var(--radius-pill);
+  background: var(--color-surface);
+  color: var(--color-brand-black);
+  font-size: clamp(0.72rem, 1.25vw, 0.85rem);
+  font-weight: 900;
+}
+
+.customer-order__items {
+  display: grid;
+  align-content: start;
+  gap: var(--space-3);
+  min-height: 0;
+  padding: var(--space-5) var(--space-1) var(--space-5) 0;
+  overflow-y: auto;
+}
+
+.customer-order-item {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-sm);
+}
+
+.customer-order-item__main {
+  min-width: 0;
+}
+
+.customer-order-item__name,
+.customer-order-item__meta {
+  margin: 0;
+}
+
+.customer-order-item__name {
+  color: var(--color-brand-black);
+  font-size: clamp(0.9rem, 1.5vw, 1.05rem);
+  font-weight: 950;
+  line-height: 1.35;
+}
+
+.customer-order-item__meta {
+  margin-top: var(--space-1);
+  color: var(--color-text-muted);
+  font-size: clamp(0.72rem, 1.25vw, 0.85rem);
+  line-height: 1.5;
+}
+
+.customer-order-item__price {
+  display: grid;
+  flex: 0 0 auto;
+  justify-items: end;
+  gap: var(--space-1);
+  color: var(--color-brand-black);
+  font-size: clamp(0.85rem, 1.5vw, 1rem);
+}
+
+.customer-order-item__quantity {
+  color: var(--color-text-muted);
+  font-size: 0.75em;
+  font-weight: 850;
+}
+
+.customer-order__summary {
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-5) 0;
+  border-top: 1px solid var(--color-border);
+}
+
+.customer-order__summary-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  color: var(--color-text-muted);
+  font-size: clamp(0.85rem, 1.45vw, 1rem);
+}
+
+.customer-order__summary-row strong {
+  color: var(--color-brand-black);
+}
+
+.customer-order__summary-row--total {
+  margin-top: var(--space-2);
+  padding-top: var(--space-4);
+  border-top: 1px dashed var(--color-border);
+  color: var(--color-brand-black);
+  font-size: clamp(1.1rem, 2.3vw, 1.5rem);
+  font-weight: 950;
+}
+
+.customer-order__summary-row--total strong {
+  color: var(--color-brand-red);
+  font-family: var(--font-display);
+  font-size: 1.15em;
+  letter-spacing: -0.05em;
+}
+
+.customer-order__footer {
+  padding: var(--space-4);
+  border-radius: var(--radius-md);
+  background: rgb(253 147 3 / 0.12);
+  color: var(--color-brand-black);
+  font-size: clamp(0.78rem, 1.3vw, 0.9rem);
+  font-weight: 750;
+  line-height: 1.5;
+}
+
+.customer-order__footer p {
+  margin: 0;
+}
+
+@media (max-width: 34rem) {
+  .customer-order {
+    padding: var(--space-6) var(--space-4);
+  }
+
+  .customer-order__header {
+    flex-direction: column;
+  }
+}
