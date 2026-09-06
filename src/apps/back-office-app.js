@@ -17,6 +17,13 @@ import {
 } from '../utils/product-validation.js'
 import { getDashboardReport } from '../utils/report-utils.js'
 
+const MAX_IMAGE_FILE_SIZE = 2 * 1024 * 1024
+const ALLOWED_IMAGE_TYPES = new Set([
+  'image/jpeg',
+  'image/png',
+  'image/webp',
+])
+
 export const backOfficeState = {
   activeView: 'dashboard',
   orders: [],
@@ -239,7 +246,7 @@ export function renderBackOffice(appElement) {
 function collectProductDraftFromDialog() {
   const dialog = document.querySelector('.product-edit-dialog')
 
-  if (!dialog) {
+  if (!dialog || !backOfficeState.productEditDraft) {
     return null
   }
 
@@ -250,12 +257,18 @@ function collectProductDraftFromDialog() {
     ...dialog.querySelectorAll('[data-variant-index]'),
   ]
 
+  const typedImagePath = getFieldValue('image').trim()
+  const selectedImage =
+    backOfficeState.productEditDraft.image?.startsWith('data:image/')
+      ? backOfficeState.productEditDraft.image
+      : typedImagePath
+
   return {
     ...backOfficeState.productEditDraft,
     name: getFieldValue('name'),
     description: getFieldValue('description'),
     categoryId: getFieldValue('categoryId'),
-    image: getFieldValue('image'),
+    image: selectedImage,
     isAvailable: getFieldValue('isAvailable') === 'true',
     variants: variantSections.map((section, index) => ({
       id:
@@ -333,6 +346,109 @@ function removeVariantFromDraft(appElement, variantIndex) {
     backOfficeState.productEditDraft.variants.filter(
       (_, index) => index !== Number(variantIndex),
     )
+
+  renderBackOffice(appElement)
+}
+
+function validateImageFile(file) {
+  if (!file) {
+    return 'Choose an image file first.'
+  }
+
+  if (!ALLOWED_IMAGE_TYPES.has(file.type)) {
+    return 'Use a JPG, PNG, or WebP image file.'
+  }
+
+  if (file.size > MAX_IMAGE_FILE_SIZE) {
+    return 'Image must be 2 MB or smaller. Resize or compress it and try again.'
+  }
+
+  return ''
+}
+
+function readImageFileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+
+    reader.addEventListener('load', () => {
+      if (typeof reader.result === 'string') {
+        resolve(reader.result)
+        return
+      }
+
+      reject(new Error('Image data could not be read.'))
+    })
+
+    reader.addEventListener('error', () => {
+      reject(new Error('Image file could not be read.'))
+    })
+
+    reader.readAsDataURL(file)
+  })
+}
+
+async function handleProductImageSelection(appElement, file) {
+  const imageError = validateImageFile(file)
+
+  if (imageError) {
+    backOfficeState.productEditErrors = {
+      ...backOfficeState.productEditErrors,
+      imageUpload: imageError,
+    }
+    renderBackOffice(appElement)
+    return
+  }
+
+  if (!backOfficeState.productEditDraft) {
+    return
+  }
+
+  try {
+    const imageDataUrl = await readImageFileAsDataUrl(file)
+
+    backOfficeState.productEditDraft = {
+      ...backOfficeState.productEditDraft,
+      image: imageDataUrl,
+    }
+
+    backOfficeState.productEditErrors = {
+      ...backOfficeState.productEditErrors,
+      imageUpload: '',
+      image: '',
+    }
+
+    renderBackOffice(appElement)
+  } catch (error) {
+    console.error('Failed to read selected image:', error)
+    backOfficeState.productEditErrors = {
+      ...backOfficeState.productEditErrors,
+      imageUpload: 'Image could not be read. Please choose another file.',
+    }
+    renderBackOffice(appElement)
+  }
+}
+
+function removeSelectedProductImage(appElement) {
+  updateProductEditDraftFromDialog()
+
+  if (!backOfficeState.productEditDraft) {
+    return
+  }
+
+  const effectiveProduct = getEffectiveMenuItems().find(
+    (product) => product.id === backOfficeState.productEditDraft.id,
+  )
+
+  backOfficeState.productEditDraft = {
+    ...backOfficeState.productEditDraft,
+    image: effectiveProduct?.fallbackImage || '',
+  }
+
+  backOfficeState.productEditErrors = {
+    ...backOfficeState.productEditErrors,
+    imageUpload: '',
+    image: '',
+  }
 
   renderBackOffice(appElement)
 }
@@ -448,6 +564,18 @@ function attachBackOfficeEventListeners(appElement) {
       removeVariantFromDraft(appElement, button.dataset.removeVariant)
     })
   })
+
+  document
+    .querySelector('[data-product-image-file]')
+    ?.addEventListener('change', (event) => {
+      handleProductImageSelection(appElement, event.target.files?.[0])
+    })
+
+  document
+    .querySelector('[data-remove-product-image]')
+    ?.addEventListener('click', () => {
+      removeSelectedProductImage(appElement)
+    })
 
   document
     .querySelector('[data-save-product]')

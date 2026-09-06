@@ -11,6 +11,10 @@ function createVariantId(name, index) {
   return normalizedName || `variant-${index + 1}`
 }
 
+function isValidLocalImageDataUrl(value) {
+  return /^data:image\/(jpeg|png|webp);base64,/i.test(value)
+}
+
 export function validateProductDraft(draft, categories) {
   const errors = {}
   const validCategoryIds = categories
@@ -33,8 +37,13 @@ export function validateProductDraft(draft, categories) {
     errors.description = 'Description cannot be more than 250 characters.'
   }
 
-  if (image && !image.startsWith('/images/')) {
-    errors.image = 'Image path must begin with /images/.'
+  if (
+    image &&
+    !image.startsWith('/images/') &&
+    !isValidLocalImageDataUrl(image)
+  ) {
+    errors.image =
+      'Image must be a local upload or a path beginning with /images/.'
   }
 
   if (!Array.isArray(draft.variants) || draft.variants.length === 0) {
@@ -67,11 +76,13 @@ export function validateProductDraft(draft, categories) {
 }
 
 export function normalizeProductDraft(draft) {
+  const image = normalizeText(draft.image)
+
   return {
     ...draft,
     name: normalizeText(draft.name),
     description: normalizeText(draft.description),
-    image: normalizeText(draft.image),
+    image,
     isAvailable: Boolean(draft.isAvailable),
     variants: draft.variants.map((variant, index) => ({
       ...variant,

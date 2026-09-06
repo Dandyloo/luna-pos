@@ -7,6 +7,10 @@ function escapeHtml(value) {
     .replaceAll("'", '&#039;')
 }
 
+function getPreviewImageSource(formData) {
+  return formData.image || formData.fallbackImage || ''
+}
+
 function renderVariantEditor(variant, index, canRemove) {
   return `
     <section class="product-edit-variant" data-variant-index="${index}">
@@ -66,6 +70,7 @@ export function renderProductEditDialog({
   const formData = draft || product
   const variants = formData.variants || []
   const errorMessage = errors?.form || ''
+  const imagePreviewSource = getPreviewImageSource(formData)
 
   return `
     <dialog class="product-edit-dialog" aria-labelledby="product-edit-title">
@@ -164,18 +169,102 @@ export function renderProductEditDialog({
               </select>
             </label>
 
+            <section class="product-image-editor product-edit-field--full">
+              <div class="product-image-editor__header">
+                <div>
+                  <p class="product-image-editor__label">Product image</p>
+                  <p class="product-image-editor__hint">
+                    Use a square 640 × 640 image. JPG, PNG, and WebP are accepted.
+                  </p>
+                </div>
+
+                <span class="product-image-editor__size-note">
+                  Maximum 2 MB
+                </span>
+              </div>
+
+              <div class="product-image-editor__content">
+                <div class="product-image-editor__preview-wrap">
+                  ${
+                    imagePreviewSource
+                      ? `
+                        <img
+                          class="product-image-editor__preview"
+                          src="${escapeHtml(imagePreviewSource)}"
+                          alt="Product image preview"
+                          width="640"
+                          height="640"
+                          data-image-preview
+                        />
+                      `
+                      : `
+                        <div
+                          class="product-image-editor__placeholder"
+                          data-image-preview-placeholder
+                          aria-hidden="true"
+                        >
+                          No image
+                        </div>
+                      `
+                  }
+                </div>
+
+                <div class="product-image-editor__controls">
+                  <label class="button button--secondary product-image-editor__upload-button">
+                    Choose image
+                    <input
+                      class="product-image-editor__file-input"
+                      type="file"
+                      accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp"
+                      data-product-image-file
+                    />
+                  </label>
+
+                  <button
+                    class="product-image-editor__remove-button"
+                    type="button"
+                    data-remove-product-image
+                    ${formData.image ? '' : 'disabled'}
+                  >
+                    Remove selected image
+                  </button>
+
+                  <p class="product-image-editor__status" data-image-upload-status>
+                    ${
+                      formData.image?.startsWith('data:image/')
+                        ? 'A local image is selected and will save with this product.'
+                        : formData.image
+                          ? 'This product uses an image path.'
+                          : 'No custom image selected.'
+                    }
+                  </p>
+                </div>
+              </div>
+
+              ${
+                errors?.imageUpload
+                  ? `<small class="product-edit-field__error">${escapeHtml(
+                      errors.imageUpload,
+                    )}</small>`
+                  : ''
+              }
+            </section>
+
             <label class="product-edit-field product-edit-field--full">
               <span>Image path</span>
               <input
                 type="text"
-                value="${escapeHtml(formData.image || '')}"
+                value="${escapeHtml(
+                  formData.image?.startsWith('data:image/')
+                    ? ''
+                    : formData.image || '',
+                )}"
                 data-product-field="image"
                 placeholder="/images/products/category/product-name.jpg"
                 maxlength="200"
               />
               <small class="product-edit-field__hint">
-                Use an image in the public/images folder, such as
-                /images/products/boba/brown-sugar-milk-tea.jpg
+                Optional for images placed in public/images. Choosing an image file above takes priority.
               </small>
               ${
                 errors?.image
