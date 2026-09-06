@@ -7,13 +7,12 @@ import "./styles/receipt.css";
 import "./styles/customer-display.css";
 import "./styles/back-office.css";
 import { startApplication } from "./apps/app-bootstrap.js";
+import { loadBackOfficeData } from './apps/back-office-app.js'
 import {
-  backOfficeState,
   getEffectiveMenuItems,
-  loadBackOfficeData,
-} from "./apps/back-office-app.js";
+  loadMenuOverrides,
+} from './state/menu-state.js';
 
-import { getAllMenuOverrides } from './services/menu-repository.js'
 
 import { renderCustomerOrderStatus } from "./components/customer-order-status.js";
 import { renderCustomerOrderView } from "./components/customer-order-view.js";
@@ -2323,7 +2322,7 @@ function renderPlaceholder() {
 
 async function loadMenuOverridesForPos() {
   try {
-    backOfficeState.menuOverrides = await getAllMenuOverrides()
+    await loadMenuOverrides()
   } catch (error) {
     console.error('Failed to load menu overrides for POS:', error)
   }

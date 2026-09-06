@@ -1,48 +1,44 @@
-import { renderBackOfficeDashboard } from '../components/back-office-dashboard.js'
-import { renderBackOfficeMenu } from '../components/back-office-menu.js'
-import { categories, menuItems as defaultMenuItems } from '../data/menu-data.js'
+import { renderBackOfficeDashboard } from "../components/back-office-dashboard.js";
+import { renderBackOfficeMenu } from "../components/back-office-menu.js";
+import { getAllOrders } from "../services/order-repository.js";
+import { categories } from "../data/menu-data.js";
 import {
-  getAllMenuOverrides,
-  saveMenuOverride,
-} from '../services/menu-repository.js'
-import { getAllOrders } from '../services/order-repository.js'
-import { formatShortGhs } from '../utils/formatters.js'
-import { createEffectiveMenu } from '../utils/menu-utils.js'
-import { getAppUrl } from '../modules/app-router.js'
-import { handleProductImageError } from '../utils/product-utils.js'
-import { getDashboardReport } from '../utils/report-utils.js'
+  getEffectiveMenuItems,
+  getMenuOverrides,
+  loadMenuOverrides,
+  saveMenuOverrideAndUpdateState,
+} from "../state/menu-state.js";
+import { formatShortGhs } from "../utils/formatters.js";
+import { getAppUrl } from "../modules/app-router.js";
+import { handleProductImageError } from "../utils/product-utils.js";
+import { getDashboardReport } from "../utils/report-utils.js";
 
 export const backOfficeState = {
-  activeView: 'dashboard',
+  activeView: "dashboard",
   orders: [],
-  menuOverrides: [],
-  selectedCategoryId: 'all',
-  menuSearchQuery: '',
+  selectedCategoryId: "all",
+  menuSearchQuery: "",
   isLoading: false,
   isSavingMenu: false,
-  error: '',
-}
+  error: "",
+};
 
 function escapeHtml(value) {
   return String(value)
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;')
-    .replaceAll("'", '&#039;')
-}
-
-export function getEffectiveMenuItems() {
-  return createEffectiveMenu(defaultMenuItems, backOfficeState.menuOverrides)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
 }
 
 const backOfficeNavigation = [
-  { id: 'dashboard', number: '01', label: 'Dashboard' },
-  { id: 'orders', number: '02', label: 'Orders' },
-  { id: 'sales', number: '03', label: 'Sales & Reports' },
-  { id: 'items', number: '04', label: 'Menu & Items' },
-  { id: 'settings', number: '05', label: 'Settings' },
-]
+  { id: "dashboard", number: "01", label: "Dashboard" },
+  { id: "orders", number: "02", label: "Orders" },
+  { id: "sales", number: "03", label: "Sales & Reports" },
+  { id: "items", number: "04", label: "Menu & Items" },
+  { id: "settings", number: "05", label: "Settings" },
+];
 
 function renderBackOfficeNavigation() {
   return backOfficeNavigation
@@ -51,13 +47,13 @@ function renderBackOfficeNavigation() {
         <button
           class="back-office-nav-item ${
             backOfficeState.activeView === item.id
-              ? 'back-office-nav-item--active'
-              : ''
+              ? "back-office-nav-item--active"
+              : ""
           }"
           type="button"
           data-back-office-view="${item.id}"
           aria-current="${
-            backOfficeState.activeView === item.id ? 'page' : 'false'
+            backOfficeState.activeView === item.id ? "page" : "false"
           }"
         >
           <span class="back-office-nav-item__number" aria-hidden="true">
@@ -67,7 +63,7 @@ function renderBackOfficeNavigation() {
         </button>
       `,
     )
-    .join('')
+    .join("");
 }
 
 function renderBackOfficePlaceholder(title, description) {
@@ -86,14 +82,14 @@ function renderBackOfficePlaceholder(title, description) {
         <p>This section is planned for an upcoming build step.</p>
       </section>
     </section>
-  `
+  `;
 }
 
 export function renderBackOffice(appElement) {
-  const report = getDashboardReport(backOfficeState.orders)
-  const effectiveMenuItems = getEffectiveMenuItems()
+  const report = getDashboardReport(backOfficeState.orders);
+  const effectiveMenuItems = getEffectiveMenuItems();
 
-  let mainContent = ''
+  let mainContent = "";
 
   if (backOfficeState.isLoading) {
     mainContent = `
@@ -102,32 +98,32 @@ export function renderBackOffice(appElement) {
           Loading local business data...
         </p>
       </section>
-    `
-  } else if (backOfficeState.activeView === 'dashboard') {
-    mainContent = renderBackOfficeDashboard(report)
-  } else if (backOfficeState.activeView === 'items') {
+    `;
+  } else if (backOfficeState.activeView === "dashboard") {
+    mainContent = renderBackOfficeDashboard(report);
+  } else if (backOfficeState.activeView === "items") {
     mainContent = renderBackOfficeMenu({
       categories,
       menuItems: effectiveMenuItems,
       selectedCategoryId: backOfficeState.selectedCategoryId,
       searchQuery: backOfficeState.menuSearchQuery,
       isSaving: backOfficeState.isSavingMenu,
-    })
-  } else if (backOfficeState.activeView === 'orders') {
+    });
+  } else if (backOfficeState.activeView === "orders") {
     mainContent = renderBackOfficePlaceholder(
-      'Orders',
-      'A dedicated owner-level order management view will be added after menu management.',
-    )
-  } else if (backOfficeState.activeView === 'sales') {
+      "Orders",
+      "A dedicated owner-level order management view will be added after menu management.",
+    );
+  } else if (backOfficeState.activeView === "sales") {
     mainContent = renderBackOfficePlaceholder(
-      'Sales & Reports',
-      'Expanded sales reports and export tools will be added in a later phase.',
-    )
+      "Sales & Reports",
+      "Expanded sales reports and export tools will be added in a later phase.",
+    );
   } else {
     mainContent = renderBackOfficePlaceholder(
-      'Settings',
-      'Tax, discounts, receipt, device, and business settings will be added in a later phase.',
-    )
+      "Settings",
+      "Tax, discounts, receipt, device, and business settings will be added in a later phase.",
+    );
   }
 
   appElement.innerHTML = `
@@ -152,7 +148,7 @@ export function renderBackOffice(appElement) {
             <p class="back-office-sidebar__mode-value">Local device records</p>
           </section>
 
-          <a class="back-office-sidebar__back-link" href="${getAppUrl('launcher')}">
+          <a class="back-office-sidebar__back-link" href="${getAppUrl("launcher")}">
             <span aria-hidden="true">←</span>
             <span>System launcher</span>
           </a>
@@ -167,139 +163,124 @@ export function renderBackOffice(appElement) {
                 ${escapeHtml(backOfficeState.error)}
               </p>
             `
-            : ''
+            : ""
         }
 
         ${mainContent}
       </section>
     </main>
-  `
+  `;
 
-  attachBackOfficeEventListeners(appElement)
+  attachBackOfficeEventListeners(appElement);
 }
 
 function attachBackOfficeEventListeners(appElement) {
-  appElement.querySelectorAll('[data-back-office-view]').forEach((button) => {
-    button.addEventListener('click', () => {
-      backOfficeState.activeView = button.dataset.backOfficeView
-      renderBackOffice(appElement)
-    })
-  })
+  appElement.querySelectorAll("[data-back-office-view]").forEach((button) => {
+    button.addEventListener("click", () => {
+      backOfficeState.activeView = button.dataset.backOfficeView;
+      renderBackOffice(appElement);
+    });
+  });
 
   appElement
-    .querySelector('[data-refresh-back-office]')
-    ?.addEventListener('click', () => {
-      loadBackOfficeData(appElement)
-    })
+    .querySelector("[data-refresh-back-office]")
+    ?.addEventListener("click", () => {
+      loadBackOfficeData(appElement);
+    });
 
-  appElement.querySelectorAll('[data-menu-category]').forEach((button) => {
-    button.addEventListener('click', () => {
-      backOfficeState.selectedCategoryId = button.dataset.menuCategory
-      renderBackOffice(appElement)
-    })
-  })
-
-  appElement
-    .querySelector('[data-menu-search]')
-    ?.addEventListener('input', (event) => {
-      backOfficeState.menuSearchQuery = event.target.value
-      renderBackOffice(appElement)
-    })
+  appElement.querySelectorAll("[data-menu-category]").forEach((button) => {
+    button.addEventListener("click", () => {
+      backOfficeState.selectedCategoryId = button.dataset.menuCategory;
+      renderBackOffice(appElement);
+    });
+  });
 
   appElement
-    .querySelectorAll('[data-toggle-product-availability]')
+    .querySelector("[data-menu-search]")
+    ?.addEventListener("input", (event) => {
+      backOfficeState.menuSearchQuery = event.target.value;
+      renderBackOffice(appElement);
+    });
+
+  appElement
+    .querySelectorAll("[data-toggle-product-availability]")
     .forEach((button) => {
-      button.addEventListener('click', () => {
-        toggleProductAvailability(appElement, button.dataset.toggleProductAvailability)
-      })
-    })
+      button.addEventListener("click", () => {
+        toggleProductAvailability(
+          appElement,
+          button.dataset.toggleProductAvailability,
+        );
+      });
+    });
 
-  appElement.querySelectorAll('.menu-item-row__image').forEach((image) => {
+  appElement.querySelectorAll(".menu-item-row__image").forEach((image) => {
     image.addEventListener(
-      'error',
+      "error",
       () => {
-        handleProductImageError(image, image.dataset.fallbackImage)
+        handleProductImageError(image, image.dataset.fallbackImage);
       },
       { once: true },
-    )
-  })
+    );
+  });
 }
 
 async function toggleProductAvailability(appElement, productId) {
   if (backOfficeState.isSavingMenu) {
-    return
+    return;
   }
 
-  const effectiveMenuItems = getEffectiveMenuItems()
-  const product = effectiveMenuItems.find((item) => item.id === productId)
+  const effectiveMenuItems = getEffectiveMenuItems();
+  const product = effectiveMenuItems.find((item) => item.id === productId);
 
   if (!product) {
-    return
+    return;
   }
 
-  backOfficeState.isSavingMenu = true
-  backOfficeState.error = ''
-  renderBackOffice(appElement)
+  backOfficeState.isSavingMenu = true;
+  backOfficeState.error = "";
+  renderBackOffice(appElement);
 
   try {
     const previousOverride =
-      backOfficeState.menuOverrides.find(
-        (override) => override.id === productId,
-      ) || {}
+  getMenuOverrides().find((override) => override.id === productId) || {};
 
     const updatedOverride = {
       ...previousOverride,
       id: product.id,
       isAvailable: !product.isAvailable,
       updatedAt: new Date().toISOString(),
-    }
+    };
 
-    await saveMenuOverride(updatedOverride)
+    await saveMenuOverrideAndUpdateState(updatedOverride);
 
-    const existingOverrideIndex = backOfficeState.menuOverrides.findIndex(
-      (override) => override.id === productId,
-    )
-
-    if (existingOverrideIndex >= 0) {
-      backOfficeState.menuOverrides = backOfficeState.menuOverrides.map(
-        (override) =>
-          override.id === productId ? updatedOverride : override,
-      )
-    } else {
-      backOfficeState.menuOverrides = [
-        ...backOfficeState.menuOverrides,
-        updatedOverride,
-      ]
-    }
   } catch (error) {
-    console.error('Failed to update product availability:', error)
+    console.error("Failed to update product availability:", error);
     backOfficeState.error =
-      'Product availability could not be saved. Please try again.'
+      "Product availability could not be saved. Please try again.";
   } finally {
-    backOfficeState.isSavingMenu = false
-    renderBackOffice(appElement)
+    backOfficeState.isSavingMenu = false;
+    renderBackOffice(appElement);
   }
 }
 
 export async function loadBackOfficeData(appElement) {
-  backOfficeState.isLoading = true
-  backOfficeState.error = ''
-  renderBackOffice(appElement)
+  backOfficeState.isLoading = true;
+  backOfficeState.error = "";
+  renderBackOffice(appElement);
 
   try {
-    const [orders, menuOverrides] = await Promise.all([
-      getAllOrders(),
-      getAllMenuOverrides(),
-    ])
+   const [orders] = await Promise.all([
+  getAllOrders(),
+  loadMenuOverrides(),
+])
 
-    backOfficeState.orders = orders
-    backOfficeState.menuOverrides = menuOverrides
+backOfficeState.orders = orders;
   } catch (error) {
-    console.error('Failed to load Back Office data:', error)
+    console.error("Failed to load Back Office data:", error);
     backOfficeState.error =
-      'Back Office data could not be loaded from this device. Please refresh and try again.'
+      "Back Office data could not be loaded from this device. Please refresh and try again.";
   } finally {
-    backOfficeState.isLoading = false
-    renderBackOffice(appElement)
+    backOfficeState.isLoading = false;
+    renderBackOffice(appElement);
   }
 }
