@@ -58,7 +58,7 @@ export function renderBackOfficeMenu({
             Menu & Items
           </h1>
           <p class="back-office-dashboard__subtitle">
-            Manage product availability now. Product names, prices, variants, and images will be editable in the next step.
+            Update product details, prices, availability, variants, and image paths.
           </p>
         </div>
       </header>
@@ -66,7 +66,8 @@ export function renderBackOfficeMenu({
       <section class="back-office-notice" role="status">
         <span class="back-office-notice__mark" aria-hidden="true">i</span>
         <p>
-          Changes made here are stored locally on this device. Historical orders keep their original item and price details.
+          Changes are stored locally on this device. Historical orders preserve
+          the product names and prices recorded at checkout.
         </p>
       </section>
 
@@ -251,6 +252,15 @@ export function renderBackOfficeMenu({
                                   ? 'Mark sold out'
                                   : 'Make available'
                               }
+                            </button>
+
+                            <button
+                              class="menu-item-row__edit"
+                              type="button"
+                              data-edit-product="${product.id}"
+                              ${isSaving ? 'disabled' : ''}
+                            >
+                              Edit item
                             </button>
                           </div>
                         </article>
