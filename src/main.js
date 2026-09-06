@@ -8,9 +8,7 @@ import './styles/customer-display.css'
 import './styles/back-office.css'
 
 import { renderBackOfficeDashboard } from './components/back-office-dashboard.js'
-import { getDashboardReport } from './utils/report-utils.js'
-
-
+import { renderBackOfficeMenu } from './components/back-office-menu.js'
 import { renderCustomerOrderStatus } from './components/customer-order-status.js'
 import { renderCustomerOrderView } from './components/customer-order-view.js'
 import { renderItemCustomizationDialog } from './components/item-customization-dialog.js'
@@ -18,6 +16,10 @@ import { renderOrderCard, renderOrdersEmptyState } from './components/order-card
 import { renderOrderDetails } from './components/order-details.js'
 import { renderPaymentDialog } from './components/payment-dialog.js'
 import { renderNoProductsState, renderProductCard } from './components/product-card.js'
+import {
+  getReceiptPrintDocument,
+  renderReceiptDialog,
+} from './components/receipt.js'
 import {
   clearCustomerDisplay,
   initializeCustomerDisplayChannel,
@@ -27,9 +29,24 @@ import {
   requestActiveCustomerDraft,
   subscribeToCustomerDisplayMessages,
 } from './services/customer-display-channel.js'
-import { categories, menuItems, modifierGroups } from './data/menu-data.js'
+import {
+  getAllMenuOverrides,
+  saveMenuOverride,
+} from './services/menu-repository.js'
+import {
+  getAllOrders,
+  getOrderCount,
+  saveOrder,
+  updateOrder,
+} from './services/order-repository.js'
+import {
+  categories,
+  menuItems as defaultMenuItems,
+  modifierGroups,
+} from './data/menu-data.js'
 import { calculateOrderTotals } from './utils/financial-utils.js'
 import { formatShortGhs } from './utils/formatters.js'
+import { createEffectiveMenu } from './utils/menu-utils.js'
 import { getAppUrl, getCurrentApp } from './modules/app-router.js'
 import {
   addCartItem,
@@ -41,12 +58,7 @@ import {
   updateCartItemQuantity,
 } from './utils/order-utils.js'
 import { getCategoryById, handleProductImageError } from './utils/product-utils.js'
-import {
-  getAllOrders,
-  getOrderCount,
-  saveOrder,
-  updateOrder,
-} from './services/order-repository.js'
+import { getDashboardReport } from './utils/report-utils.js'
 
 const app = document.querySelector('#app')
 
@@ -168,8 +180,13 @@ const customerDisplayState = {
 }
 
 const backOfficeState = {
+  activeView: 'dashboard',
   orders: [],
+  menuOverrides: [],
+  selectedCategoryId: 'all',
+  menuSearchQuery: '',
   isLoading: false,
+  isSavingMenu: false,
   error: '',
 }
 
@@ -180,6 +197,10 @@ function escapeHtml(value) {
     .replaceAll('>', '&gt;')
     .replaceAll('"', '&quot;')
     .replaceAll("'", '&#039;')
+}
+
+function getEffectiveMenuItems() {
+  return createEffectiveMenu(defaultMenuItems, backOfficeState.menuOverrides)
 }
 
 function getOrderTotals() {
@@ -225,7 +246,7 @@ function publishCurrentCustomerDraft() {
 function getVisibleProducts() {
   const normalizedQuery = posState.searchQuery.trim().toLowerCase()
 
-  return menuItems.filter((product) => {
+  return getEffectiveMenuItems().filter((product) => {
     const matchesCategory =
       posState.selectedCategoryId === 'all' ||
       product.categoryId === posState.selectedCategoryId
@@ -761,7 +782,7 @@ function renderActiveCustomizationDialog() {
     return ''
   }
 
-  const product = menuItems.find(
+  const product = getEffectiveMenuItems().find(
     (menuItem) => menuItem.id === posState.activeProductId,
   )
 
@@ -1107,11 +1128,8 @@ function renderPos() {
     </main>
 
     ${renderActiveCustomizationDialog()}
-
     ${renderPaymentDialogForCurrentContext()}
-
     ${renderOrderConfirmation()}
-
     ${renderActiveReceiptDialog()}
   `
 
@@ -1234,6 +1252,140 @@ function renderCustomerDisplay() {
       </section>
     </main>
   `
+}
+
+function renderBackOfficeNavigation() {
+  return backOfficeNavigation
+    .map(
+      (item) => `
+        <button
+          class="back-office-nav-item ${
+            backOfficeState.activeView === item.id
+              ? 'back-office-nav-item--active'
+              : ''
+          }"
+          type="button"
+          data-back-office-view="${item.id}"
+          aria-current="${
+            backOfficeState.activeView === item.id ? 'page' : 'false'
+          }"
+        >
+          <span class="back-office-nav-item__number" aria-hidden="true">
+            ${item.number}
+          </span>
+          <span class="back-office-nav-item__label">${item.label}</span>
+        </button>
+      `,
+    )
+    .join('')
+}
+
+function renderBackOfficePlaceholder(title, description) {
+  return `
+    <section class="back-office-dashboard">
+      <header class="back-office-dashboard__header">
+        <div>
+          <p class="back-office-dashboard__eyebrow">Luna Back Office</p>
+          <h1 class="back-office-dashboard__title">${title}</h1>
+          <p class="back-office-dashboard__subtitle">${description}</p>
+        </div>
+      </header>
+
+      <section class="back-office-notice" role="status">
+        <span class="back-office-notice__mark" aria-hidden="true">i</span>
+        <p>This section is planned for an upcoming build step.</p>
+      </section>
+    </section>
+  `
+}
+
+function renderBackOffice() {
+  const report = getDashboardReport(backOfficeState.orders)
+  const effectiveMenuItems = getEffectiveMenuItems()
+
+  let mainContent = ''
+
+  if (backOfficeState.isLoading) {
+    mainContent = `
+      <section class="back-office-dashboard">
+        <p class="back-office-dashboard__subtitle">
+          Loading local business data...
+        </p>
+      </section>
+    `
+  } else if (backOfficeState.activeView === 'dashboard') {
+    mainContent = renderBackOfficeDashboard(report)
+  } else if (backOfficeState.activeView === 'items') {
+    mainContent = renderBackOfficeMenu({
+      categories,
+      menuItems: effectiveMenuItems,
+      selectedCategoryId: backOfficeState.selectedCategoryId,
+      searchQuery: backOfficeState.menuSearchQuery,
+      isSaving: backOfficeState.isSavingMenu,
+    })
+  } else if (backOfficeState.activeView === 'orders') {
+    mainContent = renderBackOfficePlaceholder(
+      'Orders',
+      'A dedicated owner-level order management view will be added after menu management.',
+    )
+  } else if (backOfficeState.activeView === 'sales') {
+    mainContent = renderBackOfficePlaceholder(
+      'Sales & Reports',
+      'Expanded sales reports and export tools will be added in a later phase.',
+    )
+  } else {
+    mainContent = renderBackOfficePlaceholder(
+      'Settings',
+      'Tax, discounts, receipt, device, and business settings will be added in a later phase.',
+    )
+  }
+
+  app.innerHTML = `
+    <main class="back-office-layout">
+      <aside class="back-office-sidebar" aria-label="Back Office navigation">
+        <div>
+          <div class="back-office-sidebar__brand" aria-label="Luna Café and Eatery">
+            <span class="back-office-sidebar__brand-mark" aria-hidden="true">L</span>
+            <span>LUNA</span>
+          </div>
+
+          <p class="back-office-sidebar__subtitle">Owner Back Office</p>
+        </div>
+
+        <nav class="back-office-sidebar__nav" aria-label="Back Office sections">
+          ${renderBackOfficeNavigation()}
+        </nav>
+
+        <div class="back-office-sidebar__footer">
+          <section class="back-office-sidebar__mode">
+            <p class="back-office-sidebar__mode-label">Data mode</p>
+            <p class="back-office-sidebar__mode-value">Local device records</p>
+          </section>
+
+          <a class="back-office-sidebar__back-link" href="${getAppUrl('launcher')}">
+            <span aria-hidden="true">←</span>
+            <span>System launcher</span>
+          </a>
+        </div>
+      </aside>
+
+      <section class="back-office-main">
+        ${
+          backOfficeState.error
+            ? `
+              <p class="order-save-error" role="alert">
+                ${escapeHtml(backOfficeState.error)}
+              </p>
+            `
+            : ''
+        }
+
+        ${mainContent}
+      </section>
+    </main>
+  `
+
+  attachBackOfficeEventListeners()
 }
 
 function scheduleCustomerDisplayIdle() {
@@ -1446,6 +1598,18 @@ function attachCartImageFallbacks() {
   })
 }
 
+function attachMenuItemImageFallbacks() {
+  document.querySelectorAll('.menu-item-row__image').forEach((image) => {
+    image.addEventListener(
+      'error',
+      () => {
+        handleProductImageError(image, image.dataset.fallbackImage)
+      },
+      { once: true },
+    )
+  })
+}
+
 function attachProductCardListeners() {
   document.querySelectorAll('[data-product-id]').forEach((button) => {
     button.addEventListener('click', () => {
@@ -1457,7 +1621,9 @@ function attachProductCardListeners() {
 }
 
 function openProductCustomization(productId) {
-  const product = menuItems.find((menuItem) => menuItem.id === productId)
+  const product = getEffectiveMenuItems().find(
+    (menuItem) => menuItem.id === productId,
+  )
 
   if (!product || !product.isAvailable || posState.isSavingOrder) {
     return
@@ -1489,7 +1655,7 @@ function closeProductCustomization() {
 
 function addCustomizedProductToCart() {
   const dialog = document.querySelector('.customization-dialog')
-  const product = menuItems.find(
+  const product = getEffectiveMenuItems().find(
     (menuItem) => menuItem.id === posState.activeProductId,
   )
 
@@ -2000,6 +2166,104 @@ async function loadOrders({ shouldRender = true } = {}) {
   }
 }
 
+function updateBackOfficeMenuResults() {
+  if (backOfficeState.activeView === 'items') {
+    renderBackOffice()
+  }
+}
+
+async function toggleProductAvailability(productId) {
+  if (backOfficeState.isSavingMenu) {
+    return
+  }
+
+  const effectiveMenuItems = getEffectiveMenuItems()
+  const product = effectiveMenuItems.find((item) => item.id === productId)
+
+  if (!product) {
+    return
+  }
+
+  backOfficeState.isSavingMenu = true
+  backOfficeState.error = ''
+  renderBackOffice()
+
+  try {
+    const previousOverride =
+      backOfficeState.menuOverrides.find((override) => override.id === productId) ||
+      {}
+
+    const updatedOverride = {
+      ...previousOverride,
+      id: product.id,
+      isAvailable: !product.isAvailable,
+      updatedAt: new Date().toISOString(),
+    }
+
+    await saveMenuOverride(updatedOverride)
+
+    const existingOverrideIndex = backOfficeState.menuOverrides.findIndex(
+      (override) => override.id === productId,
+    )
+
+    if (existingOverrideIndex >= 0) {
+      backOfficeState.menuOverrides = backOfficeState.menuOverrides.map(
+        (override) =>
+          override.id === productId ? updatedOverride : override,
+      )
+    } else {
+      backOfficeState.menuOverrides = [
+        ...backOfficeState.menuOverrides,
+        updatedOverride,
+      ]
+    }
+  } catch (error) {
+    console.error('Failed to update product availability:', error)
+    backOfficeState.error =
+      'Product availability could not be saved. Please try again.'
+  } finally {
+    backOfficeState.isSavingMenu = false
+    renderBackOffice()
+  }
+}
+
+function attachBackOfficeEventListeners() {
+  document.querySelectorAll('[data-back-office-view]').forEach((button) => {
+    button.addEventListener('click', () => {
+      backOfficeState.activeView = button.dataset.backOfficeView
+      renderBackOffice()
+    })
+  })
+
+  document
+    .querySelector('[data-refresh-back-office]')
+    ?.addEventListener('click', () => {
+      loadBackOfficeData()
+    })
+
+  document.querySelectorAll('[data-menu-category]').forEach((button) => {
+    button.addEventListener('click', () => {
+      backOfficeState.selectedCategoryId = button.dataset.menuCategory
+      renderBackOffice()
+    })
+  })
+
+  document.querySelector('[data-menu-search]')?.addEventListener('input', (event) => {
+    backOfficeState.menuSearchQuery = event.target.value
+    updateBackOfficeMenuResults()
+  })
+
+  document
+    .querySelectorAll('[data-toggle-product-availability]')
+    .forEach((button) => {
+      button.addEventListener('click', () => {
+        toggleProductAvailability(button.dataset.toggleProductAvailability)
+      })
+    })
+
+  attachMenuItemImageFallbacks()
+}
+
 function attachPosEventListeners() {
   const searchInput = document.querySelector('.pos-search__input')
 
@@ -2059,13 +2323,11 @@ function attachPosEventListeners() {
     })
   })
 
-  document
-    .querySelectorAll('[data-complete-handover]')
-    .forEach((button) => {
-      button.addEventListener('click', () => {
-        completePaidOrderHandover(button.dataset.completeHandover)
-      })
+  document.querySelectorAll('[data-complete-handover]').forEach((button) => {
+    button.addEventListener('click', () => {
+      completePaidOrderHandover(button.dataset.completeHandover)
     })
+  })
 
   document
     .querySelectorAll('[data-collect-payment-complete]')
@@ -2270,132 +2532,18 @@ function attachPosEventListeners() {
     })
 }
 
-function renderBackOfficeNavigation() {
-  return backOfficeNavigation
-    .map(
-      (item) => `
-        <button
-          class="back-office-nav-item ${
-            item.id === 'dashboard' ? 'back-office-nav-item--active' : ''
-          }"
-          type="button"
-          aria-current="${item.id === 'dashboard' ? 'page' : 'false'}"
-        >
-          <span class="back-office-nav-item__number" aria-hidden="true">
-            ${item.number}
-          </span>
-          <span class="back-office-nav-item__label">${item.label}</span>
-        </button>
-      `,
-    )
-    .join('')
-}
-
-function renderBackOffice() {
-  const report = getDashboardReport(backOfficeState.orders)
-
-  app.innerHTML = `
-    <main class="back-office-layout">
-      <aside class="back-office-sidebar" aria-label="Back Office navigation">
-        <div>
-          <div class="back-office-sidebar__brand" aria-label="Luna Café and Eatery">
-            <span class="back-office-sidebar__brand-mark" aria-hidden="true">L</span>
-            <span>LUNA</span>
-          </div>
-
-          <p class="back-office-sidebar__subtitle">Owner Back Office</p>
-        </div>
-
-        <nav class="back-office-sidebar__nav" aria-label="Back Office sections">
-          ${renderBackOfficeNavigation()}
-        </nav>
-
-        <div class="back-office-sidebar__footer">
-          <section class="back-office-sidebar__mode">
-            <p class="back-office-sidebar__mode-label">Data mode</p>
-            <p class="back-office-sidebar__mode-value">Local device records</p>
-          </section>
-
-          <a class="back-office-sidebar__back-link" href="${getAppUrl('launcher')}">
-            <span aria-hidden="true">←</span>
-            <span>System launcher</span>
-          </a>
-        </div>
-      </aside>
-
-      <section class="back-office-main">
-        ${
-          backOfficeState.error
-            ? `
-              <p class="order-save-error" role="alert">
-                ${escapeHtml(backOfficeState.error)}
-              </p>
-            `
-            : ''
-        }
-
-        ${
-          backOfficeState.isLoading
-            ? `
-              <section class="back-office-dashboard">
-                <p class="back-office-dashboard__subtitle">
-                  Loading local order data...
-                </p>
-              </section>
-            `
-            : renderBackOfficeDashboard(report)
-        }
-      </section>
-    </main>
-  `
-
-  document
-    .querySelector('[data-refresh-back-office]')
-    ?.addEventListener('click', () => {
-      loadBackOfficeOrders()
-    })
-}
-
-async function loadBackOfficeOrders() {
-  backOfficeState.isLoading = true
-  backOfficeState.error = ''
-  renderBackOffice()
-
-  try {
-    backOfficeState.orders = await getAllOrders()
-  } catch (error) {
-    console.error('Failed to load Back Office orders:', error)
-    backOfficeState.error =
-      'Back Office data could not be loaded from this device. Please refresh and try again.'
-  } finally {
-    backOfficeState.isLoading = false
-    renderBackOffice()
-  }
-}
-
-function renderPlaceholder(appName) {
-  const pageDetails = {
-    'back-office': {
-      eyebrow: 'Owner workspace',
-      title: 'Back Office',
-      description:
-        'Phase 7 will build the owner dashboard, menu management, reports, settings, daily sales, costs, expenses, and profit overview.',
-    },
-  }
-
-  const page = pageDetails[appName]
-
+function renderPlaceholder() {
   app.innerHTML = `
     <main class="route-placeholder">
       <section class="route-placeholder__card" aria-labelledby="page-title">
-        <p class="route-placeholder__eyebrow">${page.eyebrow}</p>
+        <p class="route-placeholder__eyebrow">Luna POS</p>
 
         <h1 class="route-placeholder__title" id="page-title">
-          ${page.title}
+          Page not found
         </h1>
 
         <p class="route-placeholder__copy">
-          ${page.description}
+          This Luna workspace is not available.
         </p>
 
         <a class="route-placeholder__back-link" href="${getAppUrl('launcher')}">
@@ -2404,6 +2552,37 @@ function renderPlaceholder(appName) {
       </section>
     </main>
   `
+}
+
+async function loadBackOfficeData() {
+  backOfficeState.isLoading = true
+  backOfficeState.error = ''
+  renderBackOffice()
+
+  try {
+    const [orders, menuOverrides] = await Promise.all([
+      getAllOrders(),
+      getAllMenuOverrides(),
+    ])
+
+    backOfficeState.orders = orders
+    backOfficeState.menuOverrides = menuOverrides
+  } catch (error) {
+    console.error('Failed to load Back Office data:', error)
+    backOfficeState.error =
+      'Back Office data could not be loaded from this device. Please refresh and try again.'
+  } finally {
+    backOfficeState.isLoading = false
+    renderBackOffice()
+  }
+}
+
+async function loadMenuOverridesForPos() {
+  try {
+    backOfficeState.menuOverrides = await getAllMenuOverrides()
+  } catch (error) {
+    console.error('Failed to load menu overrides for POS:', error)
+  }
 }
 
 async function renderApp() {
@@ -2419,7 +2598,11 @@ async function renderApp() {
       getCurrentDraft: getCustomerDraft,
     })
 
-    await refreshSavedOrderCount()
+    await Promise.all([
+      refreshSavedOrderCount(),
+      loadMenuOverridesForPos(),
+    ])
+
     renderPos()
     publishCurrentCustomerDraft()
     return
@@ -2440,11 +2623,11 @@ async function renderApp() {
   }
 
   if (currentApp === 'back-office') {
-    await loadBackOfficeOrders()
+    await loadBackOfficeData()
     return
   }
 
-  renderPlaceholder(currentApp)
+  renderPlaceholder()
 }
 
 renderApp()
