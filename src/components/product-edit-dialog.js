@@ -66,20 +66,29 @@ export function renderProductEditDialog({
   categories,
   draft,
   errors,
+  mode = 'edit',
 }) {
   const formData = draft || product
   const variants = formData.variants || []
   const errorMessage = errors?.form || ''
   const imagePreviewSource = getPreviewImageSource(formData)
+  const isCreateMode = mode === 'create'
 
   return `
     <dialog class="product-edit-dialog" aria-labelledby="product-edit-title">
       <form class="product-edit-dialog__form" novalidate>
         <header class="product-edit-dialog__header">
           <div>
-            <p class="product-edit-dialog__eyebrow">Menu item editor</p>
+            <p class="product-edit-dialog__eyebrow">
+              ${isCreateMode ? 'New menu item' : 'Menu item editor'}
+            </p>
+
             <h2 class="product-edit-dialog__title" id="product-edit-title">
-              Edit ${escapeHtml(product.name)}
+              ${
+                isCreateMode
+                  ? 'Add menu item'
+                  : `Edit ${escapeHtml(product.name)}`
+              }
             </h2>
           </div>
 
@@ -112,6 +121,7 @@ export function renderProductEditDialog({
                 value="${escapeHtml(formData.name)}"
                 data-product-field="name"
                 maxlength="80"
+                placeholder="Example: Luna Strawberry Waffle"
                 required
               />
               ${
@@ -344,7 +354,7 @@ export function renderProductEditDialog({
             type="submit"
             data-save-product
           >
-            Save changes
+            ${isCreateMode ? 'Create item' : 'Save changes'}
           </button>
         </footer>
       </form>

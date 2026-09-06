@@ -32,10 +32,17 @@ export function renderBackOfficeMenu({
   selectedCategoryId,
   searchQuery,
   isSaving,
+  showArchived,
 }) {
-  const availabilityTotals = getMenuAvailabilityTotals(menuItems)
+  const availabilityTotals = getMenuAvailabilityTotals(menuItems, {
+    includeArchived: true,
+  })
 
   const visibleItems = menuItems.filter((item) => {
+    const matchesArchiveState = showArchived
+      ? item.isArchived
+      : !item.isArchived
+
     const matchesCategory =
       selectedCategoryId === 'all' || item.categoryId === selectedCategoryId
 
@@ -46,8 +53,16 @@ export function renderBackOfficeMenu({
       item.name.toLowerCase().includes(normalizedQuery) ||
       item.description.toLowerCase().includes(normalizedQuery)
 
-    return matchesCategory && matchesSearch
+    return matchesArchiveState && matchesCategory && matchesSearch
   })
+
+  const categoryItemCount = (categoryId) =>
+    menuItems.filter((item) => {
+      const matchesCategory =
+        categoryId === 'all' || item.categoryId === categoryId
+
+      return matchesCategory && (showArchived ? item.isArchived : !item.isArchived)
+    }).length
 
   return `
     <section class="back-office-menu" aria-labelledby="menu-management-title">
@@ -58,23 +73,32 @@ export function renderBackOfficeMenu({
             Menu & Items
           </h1>
           <p class="back-office-dashboard__subtitle">
-            Update product details, prices, availability, variants, and image paths.
+            Create, edit, archive, restore, and manage items used by the Staff POS.
           </p>
         </div>
+
+        <button
+          class="back-office-refresh"
+          type="button"
+          data-create-product
+          ${isSaving ? 'disabled' : ''}
+        >
+          Add new item
+        </button>
       </header>
 
       <section class="back-office-notice" role="status">
         <span class="back-office-notice__mark" aria-hidden="true">i</span>
         <p>
-          Changes are stored locally on this device. Historical orders preserve
-          the product names and prices recorded at checkout.
+          Changes are stored locally on this device. Archiving hides an item from
+          future POS orders but never changes completed historical orders or receipts.
         </p>
       </section>
 
       <section class="menu-management-summary" aria-label="Menu summary">
         <article class="menu-management-summary__card">
-          <span>Total menu items</span>
-          <strong>${menuItems.length}</strong>
+          <span>Active menu items</span>
+          <strong>${availabilityTotals.available + availabilityTotals.soldOut}</strong>
         </article>
 
         <article class="menu-management-summary__card menu-management-summary__card--available">
@@ -86,11 +110,19 @@ export function renderBackOfficeMenu({
           <span>Sold out</span>
           <strong>${availabilityTotals.soldOut}</strong>
         </article>
+
+        <article class="menu-management-summary__card menu-management-summary__card--archived">
+          <span>Archived items</span>
+          <strong>${availabilityTotals.archived}</strong>
+        </article>
       </section>
 
       <section class="menu-management-layout">
         <aside class="menu-category-panel">
-          <p class="menu-category-panel__eyebrow">Categories</p>
+          <p class="menu-category-panel__eyebrow">
+            ${showArchived ? 'Archived categories' : 'Active categories'}
+          </p>
+
           <h2 class="menu-category-panel__title">Menu sections</h2>
 
           <div class="menu-category-list">
@@ -105,7 +137,7 @@ export function renderBackOfficeMenu({
               aria-pressed="${selectedCategoryId === 'all'}"
             >
               <span>All items</span>
-              <strong>${menuItems.length}</strong>
+              <strong>${categoryItemCount('all')}</strong>
             </button>
 
             ${categories
@@ -123,10 +155,7 @@ export function renderBackOfficeMenu({
                     aria-pressed="${selectedCategoryId === category.id}"
                   >
                     <span>${escapeHtml(category.name)}</span>
-                    <strong>${getMenuCategoryProductCount(
-                      menuItems,
-                      category.id,
-                    )}</strong>
+                    <strong>${categoryItemCount(category.id)}</strong>
                   </button>
                 `,
               )
@@ -137,7 +166,10 @@ export function renderBackOfficeMenu({
         <section class="menu-items-panel" aria-labelledby="menu-items-title">
           <header class="menu-items-panel__header">
             <div>
-              <p class="menu-items-panel__eyebrow">Products</p>
+              <p class="menu-items-panel__eyebrow">
+                ${showArchived ? 'Archived products' : 'Active products'}
+              </p>
+
               <h2 class="menu-items-panel__title" id="menu-items-title">
                 ${visibleItems.length} item${
                   visibleItems.length === 1 ? '' : 's'
@@ -145,18 +177,31 @@ export function renderBackOfficeMenu({
               </h2>
             </div>
 
-            <label class="menu-management-search">
-              <span class="menu-management-search__mark" aria-hidden="true"></span>
-              <input
-                type="search"
-                value="${escapeHtml(searchQuery)}"
-                placeholder="Search menu items"
-                aria-label="Search menu items"
-                data-menu-search
-                autocomplete="off"
-                spellcheck="false"
-              />
-            </label>
+            <div class="menu-items-panel__actions">
+              <button
+                class="menu-archive-filter ${
+                  showArchived ? 'menu-archive-filter--active' : ''
+                }"
+                type="button"
+                data-toggle-archived
+                aria-pressed="${showArchived}"
+              >
+                ${showArchived ? 'Show active' : 'Show archived'}
+              </button>
+
+              <label class="menu-management-search">
+                <span class="menu-management-search__mark" aria-hidden="true"></span>
+                <input
+                  type="search"
+                  value="${escapeHtml(searchQuery)}"
+                  placeholder="Search menu items"
+                  aria-label="Search menu items"
+                  data-menu-search
+                  autocomplete="off"
+                  spellcheck="false"
+                />
+              </label>
+            </div>
           </header>
 
           <div class="menu-items-list">
@@ -169,6 +214,10 @@ export function renderBackOfficeMenu({
                           product.isAvailable
                             ? ''
                             : 'menu-item-row--sold-out'
+                        } ${
+                          product.isArchived
+                            ? 'menu-item-row--archived'
+                            : ''
                         }">
                           <img
                             class="menu-item-row__image"
@@ -222,37 +271,61 @@ export function renderBackOfficeMenu({
                                     }`
                                   : 'No modifiers'
                               }</span>
+                              ${
+                                product.isCustomProduct
+                                  ? '<span>Locally created</span>'
+                                  : ''
+                              }
                             </div>
                           </div>
 
                           <div class="menu-item-row__availability">
-                            <span
-                              class="menu-availability-badge ${
-                                product.isAvailable
-                                  ? 'menu-availability-badge--available'
-                                  : 'menu-availability-badge--sold-out'
-                              }"
-                            >
-                              ${
-                                product.isAvailable
-                                  ? 'Available'
-                                  : 'Sold out'
-                              }
-                            </span>
+                            ${
+                              product.isArchived
+                                ? `
+                                  <span class="menu-availability-badge menu-availability-badge--archived">
+                                    Archived
+                                  </span>
 
-                            <button
-                              class="menu-availability-toggle"
-                              type="button"
-                              data-toggle-product-availability="${product.id}"
-                              aria-pressed="${product.isAvailable}"
-                              ${isSaving ? 'disabled' : ''}
-                            >
-                              ${
-                                product.isAvailable
-                                  ? 'Mark sold out'
-                                  : 'Make available'
-                              }
-                            </button>
+                                  <button
+                                    class="menu-availability-toggle"
+                                    type="button"
+                                    data-restore-product="${product.id}"
+                                    ${isSaving ? 'disabled' : ''}
+                                  >
+                                    Restore item
+                                  </button>
+                                `
+                                : `
+                                  <span
+                                    class="menu-availability-badge ${
+                                      product.isAvailable
+                                        ? 'menu-availability-badge--available'
+                                        : 'menu-availability-badge--sold-out'
+                                    }"
+                                  >
+                                    ${
+                                      product.isAvailable
+                                        ? 'Available'
+                                        : 'Sold out'
+                                    }
+                                  </span>
+
+                                  <button
+                                    class="menu-availability-toggle"
+                                    type="button"
+                                    data-toggle-product-availability="${product.id}"
+                                    aria-pressed="${product.isAvailable}"
+                                    ${isSaving ? 'disabled' : ''}
+                                  >
+                                    ${
+                                      product.isAvailable
+                                        ? 'Mark sold out'
+                                        : 'Make available'
+                                    }
+                                  </button>
+                                `
+                            }
 
                             <button
                               class="menu-item-row__edit"
@@ -262,6 +335,21 @@ export function renderBackOfficeMenu({
                             >
                               Edit item
                             </button>
+
+                            ${
+                              !product.isArchived
+                                ? `
+                                  <button
+                                    class="menu-item-row__archive"
+                                    type="button"
+                                    data-archive-product="${product.id}"
+                                    ${isSaving ? 'disabled' : ''}
+                                  >
+                                    Archive item
+                                  </button>
+                                `
+                                : ''
+                            }
                           </div>
                         </article>
                       `,
@@ -270,8 +358,20 @@ export function renderBackOfficeMenu({
                 : `
                   <section class="menu-items-empty-state">
                     <div class="menu-items-empty-state__mark" aria-hidden="true"></div>
-                    <h3>No menu items found</h3>
-                    <p>Try another search word or choose a different category.</p>
+                    <h3>
+                      ${
+                        showArchived
+                          ? 'No archived items found'
+                          : 'No menu items found'
+                      }
+                    </h3>
+                    <p>
+                      ${
+                        showArchived
+                          ? 'Archived products will appear here.'
+                          : 'Try another search word or choose a different category.'
+                      }
+                    </p>
                   </section>
                 `
             }

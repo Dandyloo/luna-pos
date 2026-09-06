@@ -29,9 +29,11 @@ export const backOfficeState = {
   orders: [],
   selectedCategoryId: 'all',
   menuSearchQuery: '',
+  showArchivedProducts: false,
   isLoading: false,
   isSavingMenu: false,
   error: '',
+  editorMode: null,
   editingProductId: null,
   productEditDraft: null,
   productEditErrors: {},
@@ -55,6 +57,10 @@ function escapeHtml(value) {
 }
 
 function getEditingProduct() {
+  if (backOfficeState.editorMode === 'create') {
+    return backOfficeState.productEditDraft
+  }
+
   if (!backOfficeState.editingProductId) {
     return null
   }
@@ -67,20 +73,48 @@ function getEditingProduct() {
 function createEditableProductDraft(product) {
   return {
     id: product.id,
+    isCustomProduct: Boolean(product.isCustomProduct),
     name: product.name,
     description: product.description || '',
     categoryId: product.categoryId,
     image: product.image || '',
-    fallbackImage: product.fallbackImage,
+    fallbackImage: product.fallbackImage || '/images/LUNA-BRAND-GUILD.jpg',
     isAvailable: product.isAvailable,
+    isArchived: Boolean(product.isArchived),
     isPopular: product.isPopular,
-    modifierGroupIds: [...product.modifierGroupIds],
+    modifierGroupIds: [...(product.modifierGroupIds || [])],
     variants: product.variants.map((variant) => ({
       id: variant.id,
       name: variant.name,
       price: variant.price,
       cost: variant.cost ?? null,
     })),
+  }
+}
+
+function createNewProductDraft() {
+  const firstCategory = categories.find((category) => category.id !== 'all')
+
+  return {
+    id: crypto.randomUUID(),
+    isCustomProduct: true,
+    name: '',
+    description: '',
+    categoryId: firstCategory?.id || '',
+    image: '',
+    fallbackImage: '/images/LUNA-BRAND-GUILD.jpg',
+    isAvailable: true,
+    isArchived: false,
+    isPopular: false,
+    modifierGroupIds: [],
+    variants: [
+      {
+        id: 'standard',
+        name: 'Standard',
+        price: 0,
+        cost: null,
+      },
+    ],
   }
 }
 
@@ -141,6 +175,7 @@ function renderActiveProductEditor() {
     categories,
     draft: backOfficeState.productEditDraft,
     errors: backOfficeState.productEditErrors,
+    mode: backOfficeState.editorMode,
   })
 }
 
@@ -166,6 +201,7 @@ export function renderBackOffice(appElement) {
       menuItems: effectiveMenuItems,
       selectedCategoryId: backOfficeState.selectedCategoryId,
       searchQuery: backOfficeState.menuSearchQuery,
+      showArchived: backOfficeState.showArchivedProducts,
       isSaving: backOfficeState.isSavingMenu,
     })
   } else if (backOfficeState.activeView === 'orders') {
@@ -234,7 +270,7 @@ export function renderBackOffice(appElement) {
 
   attachBackOfficeEventListeners(appElement)
 
-  if (backOfficeState.editingProductId) {
+  if (backOfficeState.editorMode) {
     const dialog = document.querySelector('.product-edit-dialog')
 
     if (dialog && !dialog.open) {
@@ -299,13 +335,27 @@ function openProductEditor(appElement, productId) {
     return
   }
 
+  backOfficeState.editorMode = 'edit'
   backOfficeState.editingProductId = product.id
   backOfficeState.productEditDraft = createEditableProductDraft(product)
   backOfficeState.productEditErrors = {}
   renderBackOffice(appElement)
 }
 
+function openNewProductEditor(appElement) {
+  if (backOfficeState.isSavingMenu) {
+    return
+  }
+
+  backOfficeState.editorMode = 'create'
+  backOfficeState.editingProductId = null
+  backOfficeState.productEditDraft = createNewProductDraft()
+  backOfficeState.productEditErrors = {}
+  renderBackOffice(appElement)
+}
+
 function closeProductEditor(appElement) {
+  backOfficeState.editorMode = null
   backOfficeState.editingProductId = null
   backOfficeState.productEditDraft = null
   backOfficeState.productEditErrors = {}
@@ -435,13 +485,9 @@ function removeSelectedProductImage(appElement) {
     return
   }
 
-  const effectiveProduct = getEffectiveMenuItems().find(
-    (product) => product.id === backOfficeState.productEditDraft.id,
-  )
-
   backOfficeState.productEditDraft = {
     ...backOfficeState.productEditDraft,
-    image: effectiveProduct?.fallbackImage || '',
+    image: '',
   }
 
   backOfficeState.productEditErrors = {
@@ -485,11 +531,16 @@ async function saveProductEdits(appElement) {
       ...existingOverride,
       ...normalizedDraft,
       id: normalizedDraft.id,
+      isCustomProduct: backOfficeState.editorMode === 'create'
+        ? true
+        : Boolean(existingOverride.isCustomProduct),
+      isArchived: Boolean(normalizedDraft.isArchived),
       updatedAt: new Date().toISOString(),
     }
 
     await saveMenuOverrideAndUpdateState(updatedOverride)
 
+    backOfficeState.editorMode = null
     backOfficeState.editingProductId = null
     backOfficeState.productEditDraft = null
     backOfficeState.productEditErrors = {}
@@ -498,6 +549,85 @@ async function saveProductEdits(appElement) {
     backOfficeState.productEditErrors = {
       form: 'Product changes could not be saved. Please try again.',
     }
+  } finally {
+    backOfficeState.isSavingMenu = false
+    renderBackOffice(appElement)
+  }
+}
+
+async function updateProductArchiveStatus(appElement, productId, isArchived) {
+  if (backOfficeState.isSavingMenu) {
+    return
+  }
+
+  const product = getEffectiveMenuItems().find(
+    (item) => item.id === productId,
+  )
+
+  if (!product) {
+    return
+  }
+
+  backOfficeState.isSavingMenu = true
+  backOfficeState.error = ''
+  renderBackOffice(appElement)
+
+  try {
+    const existingOverride =
+      getMenuOverrides().find((override) => override.id === productId) || {}
+
+    const updatedOverride = {
+      ...existingOverride,
+      ...product,
+      id: product.id,
+      isArchived,
+      isAvailable: isArchived ? false : product.isAvailable,
+      updatedAt: new Date().toISOString(),
+    }
+
+    await saveMenuOverrideAndUpdateState(updatedOverride)
+  } catch (error) {
+    console.error('Failed to update archive status:', error)
+    backOfficeState.error =
+      'Product archive status could not be saved. Please try again.'
+  } finally {
+    backOfficeState.isSavingMenu = false
+    renderBackOffice(appElement)
+  }
+}
+
+async function toggleProductAvailability(appElement, productId) {
+  if (backOfficeState.isSavingMenu) {
+    return
+  }
+
+  const effectiveMenuItems = getEffectiveMenuItems()
+  const product = effectiveMenuItems.find((item) => item.id === productId)
+
+  if (!product || product.isArchived) {
+    return
+  }
+
+  backOfficeState.isSavingMenu = true
+  backOfficeState.error = ''
+  renderBackOffice(appElement)
+
+  try {
+    const previousOverride =
+      getMenuOverrides().find((override) => override.id === productId) || {}
+
+    const updatedOverride = {
+      ...previousOverride,
+      id: product.id,
+      isAvailable: !product.isAvailable,
+      updatedAt: new Date().toISOString(),
+    }
+
+    await saveMenuOverrideAndUpdateState(updatedOverride)
+  } catch (error) {
+    console.error('Failed to update product availability:', error)
+    backOfficeState.error =
+      'Product availability could not be saved. Please try again.'
   } finally {
     backOfficeState.isSavingMenu = false
     renderBackOffice(appElement)
@@ -533,6 +663,21 @@ function attachBackOfficeEventListeners(appElement) {
     })
 
   appElement
+    .querySelector('[data-toggle-archived]')
+    ?.addEventListener('click', () => {
+      backOfficeState.showArchivedProducts =
+        !backOfficeState.showArchivedProducts
+      backOfficeState.selectedCategoryId = 'all'
+      renderBackOffice(appElement)
+    })
+
+  appElement
+    .querySelector('[data-create-product]')
+    ?.addEventListener('click', () => {
+      openNewProductEditor(appElement)
+    })
+
+  appElement
     .querySelectorAll('[data-toggle-product-availability]')
     .forEach((button) => {
       button.addEventListener('click', () => {
@@ -546,6 +691,26 @@ function attachBackOfficeEventListeners(appElement) {
   appElement.querySelectorAll('[data-edit-product]').forEach((button) => {
     button.addEventListener('click', () => {
       openProductEditor(appElement, button.dataset.editProduct)
+    })
+  })
+
+  appElement.querySelectorAll('[data-archive-product]').forEach((button) => {
+    button.addEventListener('click', () => {
+      updateProductArchiveStatus(
+        appElement,
+        button.dataset.archiveProduct,
+        true,
+      )
+    })
+  })
+
+  appElement.querySelectorAll('[data-restore-product]').forEach((button) => {
+    button.addEventListener('click', () => {
+      updateProductArchiveStatus(
+        appElement,
+        button.dataset.restoreProduct,
+        false,
+      )
     })
   })
 
@@ -593,44 +758,6 @@ function attachBackOfficeEventListeners(appElement) {
       { once: true },
     )
   })
-}
-
-async function toggleProductAvailability(appElement, productId) {
-  if (backOfficeState.isSavingMenu) {
-    return
-  }
-
-  const effectiveMenuItems = getEffectiveMenuItems()
-  const product = effectiveMenuItems.find((item) => item.id === productId)
-
-  if (!product) {
-    return
-  }
-
-  backOfficeState.isSavingMenu = true
-  backOfficeState.error = ''
-  renderBackOffice(appElement)
-
-  try {
-    const previousOverride =
-      getMenuOverrides().find((override) => override.id === productId) || {}
-
-    const updatedOverride = {
-      ...previousOverride,
-      id: product.id,
-      isAvailable: !product.isAvailable,
-      updatedAt: new Date().toISOString(),
-    }
-
-    await saveMenuOverrideAndUpdateState(updatedOverride)
-  } catch (error) {
-    console.error('Failed to update product availability:', error)
-    backOfficeState.error =
-      'Product availability could not be saved. Please try again.'
-  } finally {
-    backOfficeState.isSavingMenu = false
-    renderBackOffice(appElement)
-  }
 }
 
 export async function loadBackOfficeData(appElement) {

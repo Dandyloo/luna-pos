@@ -1462,3 +1462,96 @@
     max-width: 12rem;
   }
 }
+
+.menu-management-summary {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.menu-management-summary__card--archived strong {
+  color: var(--color-text-muted);
+}
+
+.menu-items-panel__actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-3);
+}
+
+.menu-archive-filter {
+  min-height: 2.7rem;
+  flex: 0 0 auto;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  color: var(--color-brand-black);
+  font-size: 0.78rem;
+  font-weight: 850;
+}
+
+.menu-archive-filter:hover {
+  border-color: var(--color-brand-orange);
+  background: var(--color-surface-muted);
+}
+
+.menu-archive-filter--active {
+  border-color: var(--color-brand-black);
+  background: var(--color-brand-black);
+  color: var(--color-brand-cream);
+}
+
+.menu-archive-filter:focus-visible,
+.menu-item-row__archive:focus-visible {
+  outline: 3px solid var(--color-brand-orange);
+  outline-offset: 3px;
+}
+
+.menu-item-row--archived {
+  background: rgb(15 12 12 / 0.035);
+  opacity: 0.82;
+}
+
+.menu-availability-badge--archived {
+  background: rgb(15 12 12 / 0.09);
+  color: var(--color-text-muted);
+}
+
+.menu-item-row__archive {
+  min-height: 2.25rem;
+  padding: var(--space-1) var(--space-3);
+  border: 1px solid rgb(200 42 24 / 0.25);
+  border-radius: var(--radius-sm);
+  background: rgb(200 42 24 / 0.05);
+  color: var(--color-danger);
+  font-size: 0.72rem;
+  font-weight: 850;
+}
+
+.menu-item-row__archive:hover:not(:disabled) {
+  border-color: var(--color-danger);
+  background: rgb(200 42 24 / 0.1);
+}
+
+.menu-item-row__archive:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+@media (max-width: 70rem) {
+  .menu-management-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 44rem) {
+  .menu-items-panel__actions {
+    width: 100%;
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .menu-archive-filter {
+    width: 100%;
+  }
+}

@@ -2364,4 +2364,3 @@ startApplication({
   renderNotFound: renderPlaceholder,
 });
 
-renderApp();
