@@ -13,6 +13,13 @@ db.version(2).stores({
   menuOverrides: 'id, updatedAt',
 })
 
+db.version(3).stores({
+  orders:
+    'id, orderNumber, status, paymentStatus, fulfilmentStatus, createdAt, updatedAt',
+  menuOverrides: 'id, updatedAt',
+  settings: 'id, updatedAt',
+})
+
 db.on('versionchange', () => {
   db.close()
 

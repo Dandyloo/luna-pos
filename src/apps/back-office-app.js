@@ -1,5 +1,6 @@
 import { renderBackOfficeDashboard } from '../components/back-office-dashboard.js'
 import { renderBackOfficeMenu } from '../components/back-office-menu.js'
+import { renderBackOfficeSettings } from '../components/back-office-settings.js'
 import { renderProductEditDialog } from '../components/product-edit-dialog.js'
 import { categories } from '../data/menu-data.js'
 import { getAllOrders } from '../services/order-repository.js'
@@ -9,6 +10,11 @@ import {
   loadMenuOverrides,
   saveMenuOverrideAndUpdateState,
 } from '../state/menu-state.js'
+import {
+  getTaxSettings,
+  loadTaxSettings,
+  saveTaxSettings,
+} from '../state/settings-state.js'
 import { getAppUrl } from '../modules/app-router.js'
 import { handleProductImageError } from '../utils/product-utils.js'
 import {
@@ -32,7 +38,10 @@ export const backOfficeState = {
   showArchivedProducts: false,
   isLoading: false,
   isSavingMenu: false,
+  isSavingSettings: false,
   error: '',
+  settingsError: '',
+  settingsSuccessMessage: '',
   editorMode: null,
   editingProductId: null,
   productEditDraft: null,
@@ -204,20 +213,22 @@ export function renderBackOffice(appElement) {
       showArchived: backOfficeState.showArchivedProducts,
       isSaving: backOfficeState.isSavingMenu,
     })
+  } else if (backOfficeState.activeView === 'settings') {
+    mainContent = renderBackOfficeSettings({
+      taxSettings: getTaxSettings(),
+      isSaving: backOfficeState.isSavingSettings,
+      error: backOfficeState.settingsError,
+      successMessage: backOfficeState.settingsSuccessMessage,
+    })
   } else if (backOfficeState.activeView === 'orders') {
     mainContent = renderBackOfficePlaceholder(
       'Orders',
       'A dedicated owner-level order management view will be added after menu management.',
     )
-  } else if (backOfficeState.activeView === 'sales') {
+  } else {
     mainContent = renderBackOfficePlaceholder(
       'Sales & Reports',
       'Expanded sales reports and export tools will be added in a later phase.',
-    )
-  } else {
-    mainContent = renderBackOfficePlaceholder(
-      'Settings',
-      'Tax, discounts, receipt, device, and business settings will be added in a later phase.',
     )
   }
 
@@ -531,9 +542,10 @@ async function saveProductEdits(appElement) {
       ...existingOverride,
       ...normalizedDraft,
       id: normalizedDraft.id,
-      isCustomProduct: backOfficeState.editorMode === 'create'
-        ? true
-        : Boolean(existingOverride.isCustomProduct),
+      isCustomProduct:
+        backOfficeState.editorMode === 'create'
+          ? true
+          : Boolean(existingOverride.isCustomProduct),
       isArchived: Boolean(normalizedDraft.isArchived),
       updatedAt: new Date().toISOString(),
     }
@@ -551,6 +563,130 @@ async function saveProductEdits(appElement) {
     }
   } finally {
     backOfficeState.isSavingMenu = false
+    renderBackOffice(appElement)
+  }
+}
+
+function getTaxSettingsDraft(appElement) {
+  const form = appElement.querySelector('[data-tax-settings-form]')
+
+  if (!form) {
+    return null
+  }
+
+  const name =
+    form.querySelector('[data-tax-setting="name"]')?.value.trim() || ''
+
+  const rateValue =
+    form.querySelector('[data-tax-setting="rate"]')?.value.trim() || ''
+
+  const ratePercentage = Number(rateValue)
+
+  return {
+    ...getTaxSettings(),
+    name,
+    rate: Number.isFinite(ratePercentage)
+      ? Number((ratePercentage / 100).toFixed(6))
+      : NaN,
+  }
+}
+
+function validateTaxSettings(settings) {
+  if (settings.name.length < 2 || settings.name.length > 40) {
+    return 'Tax name must contain between 2 and 40 characters.'
+  }
+
+  if (!Number.isFinite(settings.rate) || settings.rate < 0 || settings.rate > 1) {
+    return 'Tax rate must be between 0% and 100%.'
+  }
+
+  return ''
+}
+
+async function saveTaxSettingsFromForm(appElement) {
+  if (backOfficeState.isSavingSettings) {
+    return
+  }
+
+  const draft = getTaxSettingsDraft(appElement)
+
+  if (!draft) {
+    return
+  }
+
+  const validationError = validateTaxSettings(draft)
+
+  if (validationError) {
+    backOfficeState.settingsError = validationError
+    backOfficeState.settingsSuccessMessage = ''
+    renderBackOffice(appElement)
+    return
+  }
+
+  backOfficeState.isSavingSettings = true
+  backOfficeState.settingsError = ''
+  backOfficeState.settingsSuccessMessage = ''
+  renderBackOffice(appElement)
+
+  try {
+    await saveTaxSettings(draft)
+    backOfficeState.settingsSuccessMessage =
+      'Tax settings were saved and will apply to new orders.'
+  } catch (error) {
+    console.error('Failed to save tax settings:', error)
+    backOfficeState.settingsError =
+      'Tax settings could not be saved. Please try again.'
+  } finally {
+    backOfficeState.isSavingSettings = false
+    renderBackOffice(appElement)
+  }
+}
+
+function toggleTaxGlobalSetting(appElement) {
+  const settings = getTaxSettings()
+
+  saveTaxSettingsFromToggle(appElement, {
+    ...settings,
+    isGloballyEnabled: !settings.isGloballyEnabled,
+    isEnabledByDefault: settings.isGloballyEnabled
+      ? false
+      : settings.isEnabledByDefault,
+  })
+}
+
+function toggleTaxDefaultSetting(appElement) {
+  const settings = getTaxSettings()
+
+  if (!settings.isGloballyEnabled) {
+    return
+  }
+
+  saveTaxSettingsFromToggle(appElement, {
+    ...settings,
+    isEnabledByDefault: !settings.isEnabledByDefault,
+  })
+}
+
+async function saveTaxSettingsFromToggle(appElement, settings) {
+  if (backOfficeState.isSavingSettings) {
+    return
+  }
+
+  backOfficeState.isSavingSettings = true
+  backOfficeState.settingsError = ''
+  backOfficeState.settingsSuccessMessage = ''
+  renderBackOffice(appElement)
+
+  try {
+    await saveTaxSettings(settings)
+    backOfficeState.settingsSuccessMessage =
+      'Tax settings were saved and will apply to new orders.'
+  } catch (error) {
+    console.error('Failed to save tax settings:', error)
+    backOfficeState.settingsError =
+      'Tax settings could not be saved. Please try again.'
+  } finally {
+    backOfficeState.isSavingSettings = false
     renderBackOffice(appElement)
   }
 }
@@ -638,6 +774,8 @@ function attachBackOfficeEventListeners(appElement) {
   appElement.querySelectorAll('[data-back-office-view]').forEach((button) => {
     button.addEventListener('click', () => {
       backOfficeState.activeView = button.dataset.backOfficeView
+      backOfficeState.settingsError = ''
+      backOfficeState.settingsSuccessMessage = ''
       renderBackOffice(appElement)
     })
   })
@@ -714,6 +852,25 @@ function attachBackOfficeEventListeners(appElement) {
     })
   })
 
+  appElement
+    .querySelector('[data-toggle-tax-global]')
+    ?.addEventListener('click', () => {
+      toggleTaxGlobalSetting(appElement)
+    })
+
+  appElement
+    .querySelector('[data-toggle-tax-default]')
+    ?.addEventListener('click', () => {
+      toggleTaxDefaultSetting(appElement)
+    })
+
+  appElement
+    .querySelector('[data-tax-settings-form]')
+    ?.addEventListener('submit', (event) => {
+      event.preventDefault()
+      saveTaxSettingsFromForm(appElement)
+    })
+
   document.querySelectorAll('[data-close-product-editor]').forEach((button) => {
     button.addEventListener('click', () => {
       closeProductEditor(appElement)
@@ -769,6 +926,7 @@ export async function loadBackOfficeData(appElement) {
     const [orders] = await Promise.all([
       getAllOrders(),
       loadMenuOverrides(),
+      loadTaxSettings(),
     ])
 
     backOfficeState.orders = orders

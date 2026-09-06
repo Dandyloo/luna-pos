@@ -7,12 +7,12 @@ import "./styles/receipt.css";
 import "./styles/customer-display.css";
 import "./styles/back-office.css";
 import { startApplication } from "./apps/app-bootstrap.js";
-import { loadBackOfficeData } from './apps/back-office-app.js'
+import { loadBackOfficeData } from "./apps/back-office-app.js";
 import {
   getEffectiveMenuItems,
   loadMenuOverrides,
-} from './state/menu-state.js';
-
+} from "./state/menu-state.js";
+import { getTaxSettings, loadTaxSettings } from "./state/settings-state.js";
 
 import { renderCustomerOrderStatus } from "./components/customer-order-status.js";
 import { renderCustomerOrderView } from "./components/customer-order-view.js";
@@ -48,7 +48,6 @@ import {
   updateOrder,
 } from "./services/order-repository.js";
 
-
 import {
   categories,
   menuItems as defaultMenuItems,
@@ -74,7 +73,6 @@ import {
 
 const app = document.querySelector("#app");
 
-const DEMO_TAX_RATE = 0.15;
 const CURRENT_DEVICE_NAME = "Counter Tablet 1";
 const CUSTOMER_DISPLAY_STATUS_DURATION = 12_000;
 
@@ -201,13 +199,15 @@ function escapeHtml(value) {
 }
 
 function getOrderTotals() {
+  const taxSettings = getTaxSettings();
+
   return calculateOrderTotals({
     subtotal: getCartSubtotal(posState.cartItems),
     isDiscountEnabled: posState.isDiscountEnabled,
     discountType: posState.discountType,
     discountValue: posState.discountValue,
-    isTaxEnabled: posState.isTaxEnabled,
-    taxRate: DEMO_TAX_RATE,
+    isTaxEnabled: taxSettings.isGloballyEnabled && posState.isTaxEnabled,
+    taxRate: taxSettings.rate,
   });
 }
 
@@ -532,7 +532,7 @@ function renderAdjustments(totals, hasItems) {
       ? `${posState.discountValue || 0}% selected`
       : `${formatShortGhs(Number(posState.discountValue) || 0)} selected`
     : "Not applied";
-
+  const taxSettings = getTaxSettings();
   return `
     <section class="order-panel__adjustments" aria-label="Order adjustments">
       <section class="order-adjustment">
@@ -545,17 +545,25 @@ function renderAdjustments(totals, hasItems) {
             data-toggle-tax
             aria-label="Toggle tax"
             aria-pressed="${posState.isTaxEnabled}"
-            ${hasItems && !posState.isSavingOrder ? "" : "disabled"}
+            ${
+              hasItems &&
+              !posState.isSavingOrder &&
+              taxSettings.isGloballyEnabled
+                ? ""
+                : "disabled"
+            }
           ></button>
         </div>
 
         <span class="order-adjustment__value">
-          ${
-            posState.isTaxEnabled
-              ? `${(DEMO_TAX_RATE * 100).toFixed(0)}% tax is applied`
-              : "Tax is not applied"
-          }
-        </span>
+  ${
+    !taxSettings.isGloballyEnabled
+      ? "Tax is disabled in Back Office settings"
+      : posState.isTaxEnabled
+        ? `${taxSettings.name} ${(taxSettings.rate * 100).toFixed(2).replace(/\.00$/, "")}% is applied`
+        : `${taxSettings.name} is not applied`
+  }
+</span>
       </section>
 
       <section class="order-adjustment">
@@ -1614,8 +1622,13 @@ function createOrderSnapshot({
       amount: totals.discountAmount,
     },
     tax: {
-      isEnabled: posState.isTaxEnabled,
-      rate: posState.isTaxEnabled ? DEMO_TAX_RATE : 0,
+      isEnabled: getTaxSettings().isGloballyEnabled && posState.isTaxEnabled,
+      name: getTaxSettings().name,
+      rate:
+        getTaxSettings().isGloballyEnabled && posState.isTaxEnabled
+          ? getTaxSettings().rate
+          : 0,
+      calculationType: "exclusive",
       amount: totals.taxAmount,
     },
     total: totals.total,
@@ -1644,7 +1657,8 @@ function createOrderSnapshot({
 
 function resetDraftOrder() {
   posState.cartItems = [];
-  posState.isTaxEnabled = false;
+  posState.isTaxEnabled =
+    getTaxSettings().isGloballyEnabled && getTaxSettings().isEnabledByDefault;
   posState.isDiscountEnabled = false;
   posState.discountType = "percentage";
   posState.discountValue = "";
@@ -2200,7 +2214,9 @@ function attachPosEventListeners() {
     });
 
   document.querySelector("[data-toggle-tax]")?.addEventListener("click", () => {
-    if (!posState.isSavingOrder) {
+    const taxSettings = getTaxSettings();
+
+    if (!posState.isSavingOrder && taxSettings.isGloballyEnabled) {
       posState.isTaxEnabled = !posState.isTaxEnabled;
       renderPos();
       publishCurrentCustomerDraft();
@@ -2322,9 +2338,9 @@ function renderPlaceholder() {
 
 async function loadMenuOverridesForPos() {
   try {
-    await loadMenuOverrides()
+    await loadMenuOverrides();
   } catch (error) {
-    console.error('Failed to load menu overrides for POS:', error)
+    console.error("Failed to load menu overrides for POS:", error);
   }
 }
 
@@ -2333,7 +2349,14 @@ async function startPos() {
     getCurrentDraft: getCustomerDraft,
   });
 
-  await Promise.all([refreshSavedOrderCount(), loadMenuOverridesForPos()]);
+  await Promise.all([
+    refreshSavedOrderCount(),
+    loadMenuOverridesForPos(),
+    loadTaxSettings(),
+  ]);
+
+  posState.isTaxEnabled =
+    getTaxSettings().isGloballyEnabled && getTaxSettings().isEnabledByDefault;
 
   renderPos();
   publishCurrentCustomerDraft();
@@ -2363,4 +2386,3 @@ startApplication({
   startBackOffice,
   renderNotFound: renderPlaceholder,
 });
-
