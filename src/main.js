@@ -5,6 +5,11 @@ import './styles/orders.css'
 import './styles/pos.css'
 import './styles/receipt.css'
 import './styles/customer-display.css'
+import './styles/back-office.css'
+
+import { renderBackOfficeDashboard } from './components/back-office-dashboard.js'
+import { getDashboardReport } from './utils/report-utils.js'
+
 
 import { renderCustomerOrderStatus } from './components/customer-order-status.js'
 import { renderCustomerOrderView } from './components/customer-order-view.js'
@@ -114,6 +119,14 @@ const orderFilterOptions = [
   { id: 'completed', label: 'Completed' },
 ]
 
+const backOfficeNavigation = [
+  { id: 'dashboard', number: '01', label: 'Dashboard' },
+  { id: 'orders', number: '02', label: 'Orders' },
+  { id: 'sales', number: '03', label: 'Sales & Reports' },
+  { id: 'items', number: '04', label: 'Menu & Items' },
+  { id: 'settings', number: '05', label: 'Settings' },
+]
+
 const posState = {
   activeView: 'new-order',
   selectedCategoryId: 'all',
@@ -152,6 +165,12 @@ const customerDisplayState = {
   activeDraft: null,
   activeOrder: null,
   isConnected: false,
+}
+
+const backOfficeState = {
+  orders: [],
+  isLoading: false,
+  error: '',
 }
 
 function escapeHtml(value) {
@@ -2251,6 +2270,109 @@ function attachPosEventListeners() {
     })
 }
 
+function renderBackOfficeNavigation() {
+  return backOfficeNavigation
+    .map(
+      (item) => `
+        <button
+          class="back-office-nav-item ${
+            item.id === 'dashboard' ? 'back-office-nav-item--active' : ''
+          }"
+          type="button"
+          aria-current="${item.id === 'dashboard' ? 'page' : 'false'}"
+        >
+          <span class="back-office-nav-item__number" aria-hidden="true">
+            ${item.number}
+          </span>
+          <span class="back-office-nav-item__label">${item.label}</span>
+        </button>
+      `,
+    )
+    .join('')
+}
+
+function renderBackOffice() {
+  const report = getDashboardReport(backOfficeState.orders)
+
+  app.innerHTML = `
+    <main class="back-office-layout">
+      <aside class="back-office-sidebar" aria-label="Back Office navigation">
+        <div>
+          <div class="back-office-sidebar__brand" aria-label="Luna Café and Eatery">
+            <span class="back-office-sidebar__brand-mark" aria-hidden="true">L</span>
+            <span>LUNA</span>
+          </div>
+
+          <p class="back-office-sidebar__subtitle">Owner Back Office</p>
+        </div>
+
+        <nav class="back-office-sidebar__nav" aria-label="Back Office sections">
+          ${renderBackOfficeNavigation()}
+        </nav>
+
+        <div class="back-office-sidebar__footer">
+          <section class="back-office-sidebar__mode">
+            <p class="back-office-sidebar__mode-label">Data mode</p>
+            <p class="back-office-sidebar__mode-value">Local device records</p>
+          </section>
+
+          <a class="back-office-sidebar__back-link" href="${getAppUrl('launcher')}">
+            <span aria-hidden="true">←</span>
+            <span>System launcher</span>
+          </a>
+        </div>
+      </aside>
+
+      <section class="back-office-main">
+        ${
+          backOfficeState.error
+            ? `
+              <p class="order-save-error" role="alert">
+                ${escapeHtml(backOfficeState.error)}
+              </p>
+            `
+            : ''
+        }
+
+        ${
+          backOfficeState.isLoading
+            ? `
+              <section class="back-office-dashboard">
+                <p class="back-office-dashboard__subtitle">
+                  Loading local order data...
+                </p>
+              </section>
+            `
+            : renderBackOfficeDashboard(report)
+        }
+      </section>
+    </main>
+  `
+
+  document
+    .querySelector('[data-refresh-back-office]')
+    ?.addEventListener('click', () => {
+      loadBackOfficeOrders()
+    })
+}
+
+async function loadBackOfficeOrders() {
+  backOfficeState.isLoading = true
+  backOfficeState.error = ''
+  renderBackOffice()
+
+  try {
+    backOfficeState.orders = await getAllOrders()
+  } catch (error) {
+    console.error('Failed to load Back Office orders:', error)
+    backOfficeState.error =
+      'Back Office data could not be loaded from this device. Please refresh and try again.'
+  } finally {
+    backOfficeState.isLoading = false
+    renderBackOffice()
+  }
+}
+
 function renderPlaceholder(appName) {
   const pageDetails = {
     'back-office': {
@@ -2314,6 +2436,11 @@ async function renderApp() {
 
     renderCustomerDisplay()
     requestActiveCustomerDraft()
+    return
+  }
+
+  if (currentApp === 'back-office') {
+    await loadBackOfficeOrders()
     return
   }
 
