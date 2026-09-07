@@ -11,8 +11,10 @@ import {
   saveMenuOverrideAndUpdateState,
 } from '../state/menu-state.js'
 import {
+  getDiscountSettings,
   getTaxSettings,
-  loadTaxSettings,
+  loadAllBusinessSettings,
+  saveDiscountSettings,
   saveTaxSettings,
 } from '../state/settings-state.js'
 import { getAppUrl } from '../modules/app-router.js'
@@ -24,6 +26,7 @@ import {
 import { getDashboardReport } from '../utils/report-utils.js'
 
 const MAX_IMAGE_FILE_SIZE = 2 * 1024 * 1024
+
 const ALLOWED_IMAGE_TYPES = new Set([
   'image/jpeg',
   'image/png',
@@ -216,6 +219,7 @@ export function renderBackOffice(appElement) {
   } else if (backOfficeState.activeView === 'settings') {
     mainContent = renderBackOfficeSettings({
       taxSettings: getTaxSettings(),
+      discountSettings: getDiscountSettings(),
       isSaving: backOfficeState.isSavingSettings,
       error: backOfficeState.settingsError,
       successMessage: backOfficeState.settingsSuccessMessage,
@@ -305,6 +309,7 @@ function collectProductDraftFromDialog() {
   ]
 
   const typedImagePath = getFieldValue('image').trim()
+
   const selectedImage =
     backOfficeState.productEditDraft.image?.startsWith('data:image/')
       ? backOfficeState.productEditDraft.image
@@ -321,7 +326,8 @@ function collectProductDraftFromDialog() {
       id:
         backOfficeState.productEditDraft.variants[index]?.id ||
         `new-variant-${index + 1}`,
-      name: section.querySelector(`[data-variant-name="${index}"]`)?.value || '',
+      name:
+        section.querySelector(`[data-variant-name="${index}"]`)?.value || '',
       price:
         section.querySelector(`[data-variant-price="${index}"]`)?.value || '',
       cost: backOfficeState.productEditDraft.variants[index]?.cost ?? null,
@@ -481,10 +487,12 @@ async function handleProductImageSelection(appElement, file) {
     renderBackOffice(appElement)
   } catch (error) {
     console.error('Failed to read selected image:', error)
+
     backOfficeState.productEditErrors = {
       ...backOfficeState.productEditErrors,
       imageUpload: 'Image could not be read. Please choose another file.',
     }
+
     renderBackOffice(appElement)
   }
 }
@@ -558,6 +566,7 @@ async function saveProductEdits(appElement) {
     backOfficeState.productEditErrors = {}
   } catch (error) {
     console.error('Failed to save product edits:', error)
+
     backOfficeState.productEditErrors = {
       form: 'Product changes could not be saved. Please try again.',
     }
@@ -568,7 +577,7 @@ async function saveProductEdits(appElement) {
 }
 
 function getTaxSettingsDraft(appElement) {
-  const form = appElement.querySelector('[data-tax-settings-form]')
+  const form = appElement.querySelector('[data-business-settings-form]')
 
   if (!form) {
     return null
@@ -591,6 +600,37 @@ function getTaxSettingsDraft(appElement) {
   }
 }
 
+function getDiscountSettingsDraft(appElement) {
+  const form = appElement.querySelector('[data-business-settings-form]')
+
+  if (!form) {
+    return null
+  }
+
+  const maxPercentageValue =
+    form
+      .querySelector('[data-discount-setting="maxPercentage"]')
+      ?.value.trim() || ''
+
+  const maxFixedAmountValue =
+    form
+      .querySelector('[data-discount-setting="maxFixedAmount"]')
+      ?.value.trim() || ''
+
+  const maxPercentage = Number(maxPercentageValue)
+
+  const maxFixedAmount =
+    maxFixedAmountValue === '' ? null : Number(maxFixedAmountValue)
+
+  return {
+    ...getDiscountSettings(),
+    maxPercentage: Number.isFinite(maxPercentage)
+      ? maxPercentage
+      : NaN,
+    maxFixedAmount,
+  }
+}
+
 function validateTaxSettings(settings) {
   if (settings.name.length < 2 || settings.name.length > 40) {
     return 'Tax name must contain between 2 and 40 characters.'
@@ -603,21 +643,43 @@ function validateTaxSettings(settings) {
   return ''
 }
 
-async function saveTaxSettingsFromForm(appElement) {
+function validateDiscountSettings(settings) {
+  if (
+    !Number.isFinite(settings.maxPercentage) ||
+    settings.maxPercentage < 0 ||
+    settings.maxPercentage > 100
+  ) {
+    return 'Maximum percentage discount must be between 0% and 100%.'
+  }
+
+  if (
+    settings.maxFixedAmount !== null &&
+    (!Number.isFinite(settings.maxFixedAmount) ||
+      settings.maxFixedAmount < 0)
+  ) {
+    return 'Maximum fixed discount must be 0 or greater, or left blank.'
+  }
+
+  return ''
+}
+
+async function saveBusinessSettingsFromForm(appElement) {
   if (backOfficeState.isSavingSettings) {
     return
   }
 
-  const draft = getTaxSettingsDraft(appElement)
+  const taxDraft = getTaxSettingsDraft(appElement)
+  const discountDraft = getDiscountSettingsDraft(appElement)
 
-  if (!draft) {
+  if (!taxDraft || !discountDraft) {
     return
   }
 
-  const validationError = validateTaxSettings(draft)
+  const taxError = validateTaxSettings(taxDraft)
+  const discountError = validateDiscountSettings(discountDraft)
 
-  if (validationError) {
-    backOfficeState.settingsError = validationError
+  if (taxError || discountError) {
+    backOfficeState.settingsError = taxError || discountError
     backOfficeState.settingsSuccessMessage = ''
     renderBackOffice(appElement)
     return
@@ -629,13 +691,70 @@ async function saveTaxSettingsFromForm(appElement) {
   renderBackOffice(appElement)
 
   try {
-    await saveTaxSettings(draft)
+    await Promise.all([
+      saveTaxSettings(taxDraft),
+      saveDiscountSettings(discountDraft),
+    ])
+
+    backOfficeState.settingsSuccessMessage =
+      'Tax and discount settings were saved and will apply to new orders.'
+  } catch (error) {
+    console.error('Failed to save business settings:', error)
+
+    backOfficeState.settingsError =
+      'Settings could not be saved. Please try again.'
+  } finally {
+    backOfficeState.isSavingSettings = false
+    renderBackOffice(appElement)
+  }
+}
+
+async function saveTaxSettingsFromToggle(appElement, settings) {
+  if (backOfficeState.isSavingSettings) {
+    return
+  }
+
+  backOfficeState.isSavingSettings = true
+  backOfficeState.settingsError = ''
+  backOfficeState.settingsSuccessMessage = ''
+  renderBackOffice(appElement)
+
+  try {
+    await saveTaxSettings(settings)
+
     backOfficeState.settingsSuccessMessage =
       'Tax settings were saved and will apply to new orders.'
   } catch (error) {
     console.error('Failed to save tax settings:', error)
+
     backOfficeState.settingsError =
       'Tax settings could not be saved. Please try again.'
+  } finally {
+    backOfficeState.isSavingSettings = false
+    renderBackOffice(appElement)
+  }
+}
+
+async function saveDiscountSettingsFromToggle(appElement, settings) {
+  if (backOfficeState.isSavingSettings) {
+    return
+  }
+
+  backOfficeState.isSavingSettings = true
+  backOfficeState.settingsError = ''
+  backOfficeState.settingsSuccessMessage = ''
+  renderBackOffice(appElement)
+
+  try {
+    await saveDiscountSettings(settings)
+
+    backOfficeState.settingsSuccessMessage =
+      'Discount settings were saved and will apply to new orders.'
+  } catch (error) {
+    console.error('Failed to save discount settings:', error)
+
+    backOfficeState.settingsError =
+      'Discount settings could not be saved. Please try again.'
   } finally {
     backOfficeState.isSavingSettings = false
     renderBackOffice(appElement)
@@ -667,28 +786,22 @@ function toggleTaxDefaultSetting(appElement) {
   })
 }
 
-async function saveTaxSettingsFromToggle(appElement, settings) {
-  if (backOfficeState.isSavingSettings) {
-    return
-  }
+function togglePercentageDiscountSetting(appElement) {
+  const settings = getDiscountSettings()
 
-  backOfficeState.isSavingSettings = true
-  backOfficeState.settingsError = ''
-  backOfficeState.settingsSuccessMessage = ''
-  renderBackOffice(appElement)
+  saveDiscountSettingsFromToggle(appElement, {
+    ...settings,
+    isPercentageEnabled: !settings.isPercentageEnabled,
+  })
+}
 
-  try {
-    await saveTaxSettings(settings)
-    backOfficeState.settingsSuccessMessage =
-      'Tax settings were saved and will apply to new orders.'
-  } catch (error) {
-    console.error('Failed to save tax settings:', error)
-    backOfficeState.settingsError =
-      'Tax settings could not be saved. Please try again.'
-  } finally {
-    backOfficeState.isSavingSettings = false
-    renderBackOffice(appElement)
-  }
+function toggleFixedDiscountSetting(appElement) {
+  const settings = getDiscountSettings()
+
+  saveDiscountSettingsFromToggle(appElement, {
+    ...settings,
+    isFixedAmountEnabled: !settings.isFixedAmountEnabled,
+  })
 }
 
 async function updateProductArchiveStatus(appElement, productId, isArchived) {
@@ -724,6 +837,7 @@ async function updateProductArchiveStatus(appElement, productId, isArchived) {
     await saveMenuOverrideAndUpdateState(updatedOverride)
   } catch (error) {
     console.error('Failed to update archive status:', error)
+
     backOfficeState.error =
       'Product archive status could not be saved. Please try again.'
   } finally {
@@ -738,6 +852,7 @@ async function toggleProductAvailability(appElement, productId) {
   }
 
   const effectiveMenuItems = getEffectiveMenuItems()
+
   const product = effectiveMenuItems.find((item) => item.id === productId)
 
   if (!product || product.isArchived) {
@@ -762,6 +877,7 @@ async function toggleProductAvailability(appElement, productId) {
     await saveMenuOverrideAndUpdateState(updatedOverride)
   } catch (error) {
     console.error('Failed to update product availability:', error)
+
     backOfficeState.error =
       'Product availability could not be saved. Please try again.'
   } finally {
@@ -865,10 +981,22 @@ function attachBackOfficeEventListeners(appElement) {
     })
 
   appElement
-    .querySelector('[data-tax-settings-form]')
+    .querySelector('[data-toggle-percentage-discount]')
+    ?.addEventListener('click', () => {
+      togglePercentageDiscountSetting(appElement)
+    })
+
+  appElement
+    .querySelector('[data-toggle-fixed-discount]')
+    ?.addEventListener('click', () => {
+      toggleFixedDiscountSetting(appElement)
+    })
+
+  appElement
+    .querySelector('[data-business-settings-form]')
     ?.addEventListener('submit', (event) => {
       event.preventDefault()
-      saveTaxSettingsFromForm(appElement)
+      saveBusinessSettingsFromForm(appElement)
     })
 
   document.querySelectorAll('[data-close-product-editor]').forEach((button) => {
@@ -926,12 +1054,13 @@ export async function loadBackOfficeData(appElement) {
     const [orders] = await Promise.all([
       getAllOrders(),
       loadMenuOverrides(),
-      loadTaxSettings(),
+      loadAllBusinessSettings(),
     ])
 
     backOfficeState.orders = orders
   } catch (error) {
     console.error('Failed to load Back Office data:', error)
+
     backOfficeState.error =
       'Back Office data could not be loaded from this device. Please refresh and try again.'
   } finally {

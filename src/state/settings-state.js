@@ -1,5 +1,7 @@
 import {
+  getDiscountSettingsRecord,
   getTaxSettingsRecord,
+  saveDiscountSettingsRecord,
   saveTaxSettingsRecord,
 } from '../services/settings-repository.js'
 
@@ -12,10 +14,23 @@ const defaultTaxSettings = {
   calculationType: 'exclusive',
 }
 
+const defaultDiscountSettings = {
+  id: 'discount-settings',
+  isPercentageEnabled: true,
+  isFixedAmountEnabled: true,
+  maxPercentage: 100,
+  maxFixedAmount: null,
+}
+
 let taxSettings = { ...defaultTaxSettings }
+let discountSettings = { ...defaultDiscountSettings }
 
 export function getTaxSettings() {
-  return taxSettings
+  return { ...taxSettings }
+}
+
+export function getDiscountSettings() {
+  return { ...discountSettings }
 }
 
 export async function loadTaxSettings() {
@@ -27,7 +42,27 @@ export async function loadTaxSettings() {
     calculationType: 'exclusive',
   }
 
-  return taxSettings
+  return getTaxSettings()
+}
+
+export async function loadDiscountSettings() {
+  const savedSettings = await getDiscountSettingsRecord()
+
+  discountSettings = {
+    ...defaultDiscountSettings,
+    ...(savedSettings || {}),
+  }
+
+  return getDiscountSettings()
+}
+
+export async function loadAllBusinessSettings() {
+  await Promise.all([loadTaxSettings(), loadDiscountSettings()])
+
+  return {
+    taxSettings: getTaxSettings(),
+    discountSettings: getDiscountSettings(),
+  }
 }
 
 export async function saveTaxSettings(settings) {
@@ -39,5 +74,16 @@ export async function saveTaxSettings(settings) {
 
   taxSettings = savedSettings
 
-  return taxSettings
+  return getTaxSettings()
+}
+
+export async function saveDiscountSettings(settings) {
+  const savedSettings = await saveDiscountSettingsRecord({
+    ...defaultDiscountSettings,
+    ...settings,
+  })
+
+  discountSettings = savedSettings
+
+  return getDiscountSettings()
 }

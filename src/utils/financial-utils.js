@@ -13,8 +13,9 @@ export function calculateDiscountAmount({
   isDiscountEnabled,
   discountType,
   discountValue,
+  discountSettings,
 }) {
-  if (!isDiscountEnabled || subtotal <= 0) {
+  if (!isDiscountEnabled || subtotal <= 0 || !discountSettings) {
     return 0
   }
 
@@ -25,12 +26,33 @@ export function calculateDiscountAmount({
   }
 
   if (discountType === 'percentage') {
-    const percentage = clampNumber(numericValue, 0, 100)
+    if (!discountSettings.isPercentageEnabled) {
+      return 0
+    }
+
+    const maximumPercentage = clampNumber(
+      discountSettings.maxPercentage,
+      0,
+      100,
+    )
+
+    const percentage = clampNumber(numericValue, 0, maximumPercentage)
+
     return Number(((subtotal * percentage) / 100).toFixed(2))
   }
 
   if (discountType === 'fixed') {
-    return Number(Math.min(numericValue, subtotal).toFixed(2))
+    if (!discountSettings.isFixedAmountEnabled) {
+      return 0
+    }
+
+    const configuredMaximum =
+      discountSettings.maxFixedAmount === null ||
+      discountSettings.maxFixedAmount === ''
+        ? subtotal
+        : clampNumber(discountSettings.maxFixedAmount, 0, subtotal)
+
+    return Number(Math.min(numericValue, configuredMaximum).toFixed(2))
   }
 
   return 0
@@ -59,17 +81,23 @@ export function calculateOrderTotals({
   isDiscountEnabled,
   discountType,
   discountValue,
+  discountSettings,
   isTaxEnabled,
   taxRate,
 }) {
+  const normalizedSubtotal = Number(Number(subtotal || 0).toFixed(2))
+
   const discountAmount = calculateDiscountAmount({
-    subtotal,
+    subtotal: normalizedSubtotal,
     isDiscountEnabled,
     discountType,
     discountValue,
+    discountSettings,
   })
 
-  const taxableAmount = Number(Math.max(subtotal - discountAmount, 0).toFixed(2))
+  const taxableAmount = Number(
+    Math.max(normalizedSubtotal - discountAmount, 0).toFixed(2),
+  )
 
   const taxAmount = calculateTaxAmount({
     taxableAmount,
@@ -80,7 +108,7 @@ export function calculateOrderTotals({
   const total = Number((taxableAmount + taxAmount).toFixed(2))
 
   return {
-    subtotal: Number(subtotal.toFixed(2)),
+    subtotal: normalizedSubtotal,
     discountAmount,
     taxableAmount,
     taxAmount,

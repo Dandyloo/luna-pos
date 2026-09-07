@@ -6,14 +6,9 @@ import "./styles/pos.css";
 import "./styles/receipt.css";
 import "./styles/customer-display.css";
 import "./styles/back-office.css";
+
 import { startApplication } from "./apps/app-bootstrap.js";
 import { loadBackOfficeData } from "./apps/back-office-app.js";
-import {
-  getEffectiveMenuItems,
-  loadMenuOverrides,
-} from "./state/menu-state.js";
-import { getTaxSettings, loadTaxSettings } from "./state/settings-state.js";
-
 import { renderCustomerOrderStatus } from "./components/customer-order-status.js";
 import { renderCustomerOrderView } from "./components/customer-order-view.js";
 import { renderItemCustomizationDialog } from "./components/item-customization-dialog.js";
@@ -31,6 +26,7 @@ import {
   getReceiptPrintDocument,
   renderReceiptDialog,
 } from "./components/receipt.js";
+import { categories, modifierGroups } from "./data/menu-data.js";
 import {
   clearCustomerDisplay,
   initializeCustomerDisplayChannel,
@@ -40,22 +36,23 @@ import {
   requestActiveCustomerDraft,
   subscribeToCustomerDisplayMessages,
 } from "./services/customer-display-channel.js";
-
 import {
   getAllOrders,
   getOrderCount,
   saveOrder,
   updateOrder,
 } from "./services/order-repository.js";
-
 import {
-  categories,
-  menuItems as defaultMenuItems,
-  modifierGroups,
-} from "./data/menu-data.js";
+  getEffectiveMenuItems,
+  loadMenuOverrides,
+} from "./state/menu-state.js";
+import {
+  getDiscountSettings,
+  getTaxSettings,
+  loadAllBusinessSettings,
+} from "./state/settings-state.js";
 import { calculateOrderTotals } from "./utils/financial-utils.js";
 import { formatShortGhs } from "./utils/formatters.js";
-
 import { getAppUrl } from "./modules/app-router.js";
 import {
   addCartItem,
@@ -141,14 +138,6 @@ const orderFilterOptions = [
   { id: "completed", label: "Completed" },
 ];
 
-const backOfficeNavigation = [
-  { id: "dashboard", number: "01", label: "Dashboard" },
-  { id: "orders", number: "02", label: "Orders" },
-  { id: "sales", number: "03", label: "Sales & Reports" },
-  { id: "items", number: "04", label: "Menu & Items" },
-  { id: "settings", number: "05", label: "Settings" },
-];
-
 const posState = {
   activeView: "new-order",
   selectedCategoryId: "all",
@@ -200,12 +189,14 @@ function escapeHtml(value) {
 
 function getOrderTotals() {
   const taxSettings = getTaxSettings();
+  const discountSettings = getDiscountSettings();
 
   return calculateOrderTotals({
     subtotal: getCartSubtotal(posState.cartItems),
     isDiscountEnabled: posState.isDiscountEnabled,
     discountType: posState.discountType,
     discountValue: posState.discountValue,
+    discountSettings,
     isTaxEnabled: taxSettings.isGloballyEnabled && posState.isTaxEnabled,
     taxRate: taxSettings.rate,
   });
@@ -244,6 +235,10 @@ function getVisibleProducts() {
   const normalizedQuery = posState.searchQuery.trim().toLowerCase();
 
   return getEffectiveMenuItems().filter((product) => {
+    if (product.isArchived) {
+      return false;
+    }
+
     const matchesCategory =
       posState.selectedCategoryId === "all" ||
       product.categoryId === posState.selectedCategoryId;
@@ -323,6 +318,38 @@ function getFulfilmentStatusLabel(fulfilmentStatus) {
   };
 
   return labels[fulfilmentStatus] || fulfilmentStatus;
+}
+
+function getAllowedDiscountTypes() {
+  const discountSettings = getDiscountSettings();
+  const allowedTypes = [];
+
+  if (discountSettings.isPercentageEnabled) {
+    allowedTypes.push("percentage");
+  }
+
+  if (discountSettings.isFixedAmountEnabled) {
+    allowedTypes.push("fixed");
+  }
+
+  return allowedTypes;
+}
+
+function normalizeDiscountType() {
+  const allowedTypes = getAllowedDiscountTypes();
+
+  if (allowedTypes.length === 0) {
+    posState.isDiscountEnabled = false;
+    posState.discountValue = "";
+    posState.discountError = "";
+    return;
+  }
+
+  if (!allowedTypes.includes(posState.discountType)) {
+    posState.discountType = allowedTypes[0];
+    posState.discountValue = "";
+    posState.discountError = "";
+  }
 }
 
 function renderLauncher() {
@@ -504,7 +531,7 @@ function renderCartItem(cartItem) {
               class="cart-item__quantity-button"
               type="button"
               data-decrease-cart-item="${cartItem.id}"
-              aria-label="Decrease ${cartItem.productName} quantity"
+              aria-label="Decrease ${escapeHtml(cartItem.productName)} quantity"
             >
               −
             </button>
@@ -515,7 +542,7 @@ function renderCartItem(cartItem) {
               class="cart-item__quantity-button"
               type="button"
               data-increase-cart-item="${cartItem.id}"
-              aria-label="Increase ${cartItem.productName} quantity"
+              aria-label="Increase ${escapeHtml(cartItem.productName)} quantity"
             >
               +
             </button>
@@ -527,12 +554,48 @@ function renderCartItem(cartItem) {
 }
 
 function renderAdjustments(totals, hasItems) {
+  const taxSettings = getTaxSettings();
+  const discountSettings = getDiscountSettings();
+  const allowedDiscountTypes = getAllowedDiscountTypes();
+  const areDiscountsAvailable = allowedDiscountTypes.length > 0;
+
+  normalizeDiscountType();
+
   const discountSummary = posState.isDiscountEnabled
     ? posState.discountType === "percentage"
       ? `${posState.discountValue || 0}% selected`
       : `${formatShortGhs(Number(posState.discountValue) || 0)} selected`
-    : "Not applied";
-  const taxSettings = getTaxSettings();
+    : areDiscountsAvailable
+      ? "Not applied"
+      : "Discounts are disabled in Back Office settings";
+
+  const maximumFixedDiscount =
+    discountSettings.maxFixedAmount === null ||
+    discountSettings.maxFixedAmount === undefined ||
+    discountSettings.maxFixedAmount === ""
+      ? totals.subtotal
+      : Math.min(Number(discountSettings.maxFixedAmount), totals.subtotal);
+
+  const discountInputMaximum =
+    posState.discountType === "percentage"
+      ? discountSettings.maxPercentage
+      : maximumFixedDiscount;
+
+  const discountHint =
+    posState.discountType === "percentage"
+      ? `Maximum: ${discountSettings.maxPercentage}%`
+      : discountSettings.maxFixedAmount === null ||
+          discountSettings.maxFixedAmount === undefined ||
+          discountSettings.maxFixedAmount === ""
+        ? `Maximum: ${formatShortGhs(totals.subtotal)}`
+        : `Maximum: ${formatShortGhs(maximumFixedDiscount)}`;
+
+  const taxToggleDisabled =
+    !hasItems || posState.isSavingOrder || !taxSettings.isGloballyEnabled;
+
+  const discountToggleDisabled =
+    !hasItems || posState.isSavingOrder || !areDiscountsAvailable;
+
   return `
     <section class="order-panel__adjustments" aria-label="Order adjustments">
       <section class="order-adjustment">
@@ -545,25 +608,21 @@ function renderAdjustments(totals, hasItems) {
             data-toggle-tax
             aria-label="Toggle tax"
             aria-pressed="${posState.isTaxEnabled}"
-            ${
-              hasItems &&
-              !posState.isSavingOrder &&
-              taxSettings.isGloballyEnabled
-                ? ""
-                : "disabled"
-            }
+            ${taxToggleDisabled ? "disabled" : ""}
           ></button>
         </div>
 
         <span class="order-adjustment__value">
-  ${
-    !taxSettings.isGloballyEnabled
-      ? "Tax is disabled in Back Office settings"
-      : posState.isTaxEnabled
-        ? `${taxSettings.name} ${(taxSettings.rate * 100).toFixed(2).replace(/\.00$/, "")}% is applied`
-        : `${taxSettings.name} is not applied`
-  }
-</span>
+          ${
+            !taxSettings.isGloballyEnabled
+              ? "Tax is disabled in Back Office settings"
+              : posState.isTaxEnabled
+                ? `${escapeHtml(taxSettings.name)} ${(taxSettings.rate * 100)
+                    .toFixed(2)
+                    .replace(/\.00$/, "")}% is applied`
+                : `${escapeHtml(taxSettings.name)} is not applied`
+          }
+        </span>
       </section>
 
       <section class="order-adjustment">
@@ -576,7 +635,7 @@ function renderAdjustments(totals, hasItems) {
             data-toggle-discount
             aria-label="Toggle discount"
             aria-pressed="${posState.isDiscountEnabled}"
-            ${hasItems && !posState.isSavingOrder ? "" : "disabled"}
+            ${discountToggleDisabled ? "disabled" : ""}
           ></button>
         </div>
 
@@ -590,19 +649,27 @@ function renderAdjustments(totals, hasItems) {
             data-discount-type
             aria-label="Discount type"
             ${
-              posState.isDiscountEnabled && hasItems && !posState.isSavingOrder
+              posState.isDiscountEnabled &&
+              hasItems &&
+              !posState.isSavingOrder &&
+              areDiscountsAvailable
                 ? ""
                 : "disabled"
             }
           >
-            <option value="percentage" ${
-              posState.discountType === "percentage" ? "selected" : ""
-            }>
+            <option
+              value="percentage"
+              ${posState.discountType === "percentage" ? "selected" : ""}
+              ${discountSettings.isPercentageEnabled ? "" : "disabled"}
+            >
               Percentage
             </option>
-            <option value="fixed" ${
-              posState.discountType === "fixed" ? "selected" : ""
-            }>
+
+            <option
+              value="fixed"
+              ${posState.discountType === "fixed" ? "selected" : ""}
+              ${discountSettings.isFixedAmountEnabled ? "" : "disabled"}
+            >
               Fixed amount
             </option>
           </select>
@@ -612,18 +679,21 @@ function renderAdjustments(totals, hasItems) {
             type="number"
             inputmode="decimal"
             min="0"
-            max="${
-              posState.discountType === "percentage" ? "100" : totals.subtotal
-            }"
+            max="${discountInputMaximum}"
             step="0.01"
             placeholder="${
-              posState.discountType === "percentage" ? "0–100" : "Amount"
+              posState.discountType === "percentage"
+                ? `0–${discountSettings.maxPercentage}`
+                : "Amount"
             }"
             value="${escapeHtml(posState.discountValue)}"
             data-discount-value
             aria-label="Discount value"
             ${
-              posState.isDiscountEnabled && hasItems && !posState.isSavingOrder
+              posState.isDiscountEnabled &&
+              hasItems &&
+              !posState.isSavingOrder &&
+              areDiscountsAvailable
                 ? ""
                 : "disabled"
             }
@@ -631,11 +701,7 @@ function renderAdjustments(totals, hasItems) {
         </div>
 
         <p class="order-adjustment__hint" data-discount-hint>
-          ${
-            posState.discountType === "percentage"
-              ? "Enter a discount from 0% to 100%."
-              : `Maximum discount: ${formatShortGhs(totals.subtotal)}`
-          }
+          ${discountHint}
         </p>
 
         <p
@@ -681,9 +747,13 @@ function renderOrderPanel() {
           ? `
             <section
               class="order-panel__items"
-              aria-label="${cartQuantity} item${cartQuantity === 1 ? "" : "s"} in current order"
+              aria-label="${cartQuantity} item${
+                cartQuantity === 1 ? "" : "s"
+              } in current order"
             >
-              ${posState.cartItems.map((cartItem) => renderCartItem(cartItem)).join("")}
+              ${posState.cartItems
+                .map((cartItem) => renderCartItem(cartItem))
+                .join("")}
             </section>
           `
           : `
@@ -732,7 +802,7 @@ function renderOrderPanel() {
           </div>
 
           <div class="order-summary-row">
-            <span>Tax</span>
+            <span>${escapeHtml(getTaxSettings().name)}</span>
             <span class="order-summary-row__value" data-tax-total>
               ${formatShortGhs(totals.taxAmount)}
             </span>
@@ -814,13 +884,15 @@ function renderOrderConfirmation() {
       </p>
 
       <h2 class="order-confirmed__title">
-        Order ${order.orderNumber} saved locally
+        Order ${escapeHtml(order.orderNumber)} saved locally
       </h2>
 
       <p class="order-confirmed__copy">
         ${order.itemCount} item${order.itemCount === 1 ? "" : "s"} ·
         ${formatShortGhs(order.total)} ·
-        ${isPaid ? getPaymentMethodLabel(order.payments?.[0]?.method) : "Unpaid"} ·
+        ${
+          isPaid ? getPaymentMethodLabel(order.payments?.[0]?.method) : "Unpaid"
+        } ·
         ${getFulfilmentStatusLabel(order.fulfilmentStatus)}
       </p>
 
@@ -844,7 +916,10 @@ function renderOrdersWorkspace() {
         </div>
 
         <div class="pos-header__actions">
-          <span class="connection-status" title="Orders are currently stored only on this device">
+          <span
+            class="connection-status"
+            title="Orders are currently stored only on this device"
+          >
             <span class="connection-status__dot" aria-hidden="true"></span>
             Local mode
           </span>
@@ -853,7 +928,11 @@ function renderOrdersWorkspace() {
             class="pos-header__button"
             type="button"
             data-refresh-orders
-            ${posState.isLoadingOrders || posState.isUpdatingOrder ? "disabled" : ""}
+            ${
+              posState.isLoadingOrders || posState.isUpdatingOrder
+                ? "disabled"
+                : ""
+            }
           >
             Refresh
           </button>
@@ -866,7 +945,9 @@ function renderOrdersWorkspace() {
         posState.ordersLoadError || posState.orderActionError
           ? `
             <p class="order-save-error" role="alert">
-              ${escapeHtml(posState.ordersLoadError || posState.orderActionError)}
+              ${escapeHtml(
+                posState.ordersLoadError || posState.orderActionError,
+              )}
             </p>
           `
           : ""
@@ -951,12 +1032,19 @@ function renderNewOrderWorkspace() {
         </div>
 
         <div class="pos-header__actions">
-          <span class="connection-status" title="Orders are currently stored only on this device">
+          <span
+            class="connection-status"
+            title="Orders are currently stored only on this device"
+          >
             <span class="connection-status__dot" aria-hidden="true"></span>
             Local mode
           </span>
 
-          <button class="pos-header__button" type="button" data-pos-view="orders">
+          <button
+            class="pos-header__button"
+            type="button"
+            data-pos-view="orders"
+          >
             ${posState.savedOrderCount} saved order${
               posState.savedOrderCount === 1 ? "" : "s"
             }
@@ -1124,7 +1212,19 @@ function renderPos() {
       ${
         posState.activeView === "new-order"
           ? renderOrderPanel()
-          : '<aside class="pos-order-panel" aria-label="Orders workspace information"><section class="order-panel__empty"><div class="order-panel__empty-content"><div class="order-panel__empty-icon" aria-hidden="true"></div><p class="order-panel__empty-title">Order queue</p><p class="order-panel__empty-copy">Select an order from the Orders workspace to review its details.</p></div></section></aside>'
+          : `
+            <aside class="pos-order-panel" aria-label="Orders workspace information">
+              <section class="order-panel__empty">
+                <div class="order-panel__empty-content">
+                  <div class="order-panel__empty-icon" aria-hidden="true"></div>
+                  <p class="order-panel__empty-title">Order queue</p>
+                  <p class="order-panel__empty-copy">
+                    Select an order from the Orders workspace to review its details.
+                  </p>
+                </div>
+              </section>
+            </aside>
+          `
       }
     </main>
 
@@ -1197,12 +1297,19 @@ function renderCustomerDisplay() {
 
           <span class="customer-display__connection">
             <span class="customer-display__connection-dot" aria-hidden="true"></span>
-            ${customerDisplayState.isConnected ? "Waiting for order" : "Waiting for counter"}
+            ${
+              customerDisplayState.isConnected
+                ? "Waiting for order"
+                : "Waiting for counter"
+            }
           </span>
         </header>
 
         <section class="customer-display__content">
-          <section class="customer-display__welcome" aria-labelledby="customer-display-title">
+          <section
+            class="customer-display__welcome"
+            aria-labelledby="customer-display-title"
+          >
             <p class="customer-display__eyebrow">Welcome to Luna Café & Eatery</p>
 
             <h1 class="customer-display__title" id="customer-display-title">
@@ -1212,10 +1319,14 @@ function renderCustomerDisplay() {
             </h1>
 
             <p class="customer-display__copy">
-              Your order will appear here while our team prepares something delicious for you.
+              Your order will appear here while our team prepares something
+              delicious for you.
             </p>
 
-            <section class="customer-display__waiting-card" aria-label="Counter connection status">
+            <section
+              class="customer-display__waiting-card"
+              aria-label="Counter connection status"
+            >
               <div class="customer-display__waiting-mark" aria-hidden="true"></div>
 
               <div>
@@ -1224,7 +1335,8 @@ function renderCustomerDisplay() {
                 </h2>
 
                 <p class="customer-display__waiting-copy">
-                  Please place your order with the Luna counter team. You can review your items and total here.
+                  Please place your order with the Luna counter team. You can
+                  review your items and total here.
                 </p>
               </div>
             </section>
@@ -1243,7 +1355,8 @@ function renderCustomerDisplay() {
               </h2>
 
               <p class="customer-display__promo-copy">
-                Discover creamy milk teas, fruit teas, signature boba, and matcha favourites.
+                Discover creamy milk teas, fruit teas, signature boba, and
+                matcha favourites.
               </p>
             </div>
           </aside>
@@ -1340,6 +1453,7 @@ function updateProductsArea() {
 
 function updateFinancialDisplay() {
   const totals = getOrderTotals();
+  const discountSettings = getDiscountSettings();
   const subtotalValue = document.querySelector("[data-subtotal-value]");
   const discountRow = document.querySelector("[data-discount-row]");
   const discountTotal = document.querySelector("[data-discount-total]");
@@ -1382,13 +1496,23 @@ function updateFinancialDisplay() {
       : `${formatShortGhs(Number(posState.discountValue) || 0)} selected`
     : "Not applied";
 
-  discountHint.textContent =
-    posState.discountType === "percentage"
-      ? "Enter a discount from 0% to 100%."
-      : `Maximum discount: ${formatShortGhs(totals.subtotal)}`;
+  if (posState.discountType === "percentage") {
+    discountHint.textContent = `Maximum: ${discountSettings.maxPercentage}%`;
+    discountInput.max = String(discountSettings.maxPercentage);
+  } else {
+    const maximumFixedDiscount =
+      discountSettings.maxFixedAmount === null ||
+      discountSettings.maxFixedAmount === undefined ||
+      discountSettings.maxFixedAmount === ""
+        ? totals.subtotal
+        : Math.min(Number(discountSettings.maxFixedAmount), totals.subtotal);
 
-  discountInput.max =
-    posState.discountType === "percentage" ? "100" : String(totals.subtotal);
+    discountHint.textContent = `Maximum: ${formatShortGhs(
+      maximumFixedDiscount,
+    )}`;
+
+    discountInput.max = String(maximumFixedDiscount);
+  }
 
   if (posState.discountError) {
     discountError.hidden = false;
@@ -1466,18 +1590,6 @@ function attachCartImageFallbacks() {
   });
 }
 
-function attachMenuItemImageFallbacks() {
-  document.querySelectorAll(".menu-item-row__image").forEach((image) => {
-    image.addEventListener(
-      "error",
-      () => {
-        handleProductImageError(image, image.dataset.fallbackImage);
-      },
-      { once: true },
-    );
-  });
-}
-
 function attachProductCardListeners() {
   document.querySelectorAll("[data-product-id]").forEach((button) => {
     button.addEventListener("click", () => {
@@ -1493,7 +1605,12 @@ function openProductCustomization(productId) {
     (menuItem) => menuItem.id === productId,
   );
 
-  if (!product || !product.isAvailable || posState.isSavingOrder) {
+  if (
+    !product ||
+    !product.isAvailable ||
+    product.isArchived ||
+    posState.isSavingOrder
+  ) {
     return;
   }
 
@@ -1539,6 +1656,11 @@ function addCustomizedProductToCart() {
     (variant) => variant.id === variantId,
   );
 
+  if (!selectedVariant) {
+    closeProductCustomization();
+    return;
+  }
+
   const selectedModifiers = getProductModifierGroups(product).flatMap(
     (group) => {
       const optionIds =
@@ -1567,6 +1689,8 @@ function addCustomizedProductToCart() {
 }
 
 function validateDiscountValue(value) {
+  const discountSettings = getDiscountSettings();
+
   if (!posState.isDiscountEnabled || value === "") {
     return "";
   }
@@ -1577,11 +1701,40 @@ function validateDiscountValue(value) {
     return "Enter a valid discount value.";
   }
 
-  if (posState.discountType === "percentage" && numericValue > 100) {
-    return "Percentage discount cannot be more than 100%.";
+  if (
+    posState.discountType === "percentage" &&
+    !discountSettings.isPercentageEnabled
+  ) {
+    return "Percentage discounts are disabled in Back Office settings.";
+  }
+
+  if (
+    posState.discountType === "fixed" &&
+    !discountSettings.isFixedAmountEnabled
+  ) {
+    return "Fixed-amount discounts are disabled in Back Office settings.";
+  }
+
+  if (
+    posState.discountType === "percentage" &&
+    numericValue > Number(discountSettings.maxPercentage)
+  ) {
+    return `Percentage discount cannot exceed ${discountSettings.maxPercentage}%.`;
   }
 
   const subtotal = getCartSubtotal(posState.cartItems);
+
+  if (
+    posState.discountType === "fixed" &&
+    discountSettings.maxFixedAmount !== null &&
+    discountSettings.maxFixedAmount !== undefined &&
+    discountSettings.maxFixedAmount !== "" &&
+    numericValue > Number(discountSettings.maxFixedAmount)
+  ) {
+    return `Fixed discount cannot exceed ${formatShortGhs(
+      Number(discountSettings.maxFixedAmount),
+    )}.`;
+  }
 
   if (posState.discountType === "fixed" && numericValue > subtotal) {
     return `Fixed discount cannot exceed ${formatShortGhs(subtotal)}.`;
@@ -1603,6 +1756,8 @@ function createOrderSnapshot({
   cashReceived = null,
 }) {
   const totals = getOrderTotals();
+  const taxSettings = getTaxSettings();
+  const discountSettings = getDiscountSettings();
   const now = new Date();
   const itemCount = getCartQuantity(posState.cartItems);
 
@@ -1620,13 +1775,19 @@ function createOrderSnapshot({
       type: posState.isDiscountEnabled ? posState.discountType : null,
       inputValue: posState.isDiscountEnabled ? posState.discountValue : null,
       amount: totals.discountAmount,
+      settingsSnapshot: {
+        isPercentageEnabled: discountSettings.isPercentageEnabled,
+        isFixedAmountEnabled: discountSettings.isFixedAmountEnabled,
+        maxPercentage: discountSettings.maxPercentage,
+        maxFixedAmount: discountSettings.maxFixedAmount,
+      },
     },
     tax: {
-      isEnabled: getTaxSettings().isGloballyEnabled && posState.isTaxEnabled,
-      name: getTaxSettings().name,
+      isEnabled: taxSettings.isGloballyEnabled && posState.isTaxEnabled,
+      name: taxSettings.name,
       rate:
-        getTaxSettings().isGloballyEnabled && posState.isTaxEnabled
-          ? getTaxSettings().rate
+        taxSettings.isGloballyEnabled && posState.isTaxEnabled
+          ? taxSettings.rate
           : 0,
       calculationType: "exclusive",
       amount: totals.taxAmount,
@@ -1656,9 +1817,11 @@ function createOrderSnapshot({
 }
 
 function resetDraftOrder() {
+  const taxSettings = getTaxSettings();
+
   posState.cartItems = [];
   posState.isTaxEnabled =
-    getTaxSettings().isGloballyEnabled && getTaxSettings().isEnabledByDefault;
+    taxSettings.isGloballyEnabled && taxSettings.isEnabledByDefault;
   posState.isDiscountEnabled = false;
   posState.discountType = "percentage";
   posState.discountValue = "";
@@ -1670,6 +1833,8 @@ function resetDraftOrder() {
   posState.cashReceived = "";
   posState.paymentError = "";
   posState.saveOrderError = "";
+
+  normalizeDiscountType();
 }
 
 async function persistSubmittedOrder(order) {
@@ -1992,6 +2157,7 @@ function printReceipt() {
 function startNewOrder() {
   posState.lastSubmittedOrder = null;
   posState.activeView = "new-order";
+  resetDraftOrder();
   renderPos();
   clearCustomerDisplay();
 }
@@ -2226,9 +2392,25 @@ function attachPosEventListeners() {
   document
     .querySelector("[data-toggle-discount]")
     ?.addEventListener("click", () => {
-      if (!posState.isSavingOrder) {
+      const allowedDiscountTypes = getAllowedDiscountTypes();
+
+      if (
+        !posState.isSavingOrder &&
+        posState.cartItems.length > 0 &&
+        allowedDiscountTypes.length > 0
+      ) {
+        normalizeDiscountType();
         posState.isDiscountEnabled = !posState.isDiscountEnabled;
-        posState.discountError = validateDiscountValue(posState.discountValue);
+
+        if (!posState.isDiscountEnabled) {
+          posState.discountValue = "";
+          posState.discountError = "";
+        } else {
+          posState.discountError = validateDiscountValue(
+            posState.discountValue,
+          );
+        }
+
         renderPos();
         publishCurrentCustomerDraft();
       }
@@ -2237,9 +2419,15 @@ function attachPosEventListeners() {
   document
     .querySelector("[data-discount-type]")
     ?.addEventListener("change", (event) => {
-      if (!posState.isSavingOrder) {
-        posState.discountType = event.target.value;
-        posState.discountError = validateDiscountValue(posState.discountValue);
+      const nextDiscountType = event.target.value;
+
+      if (
+        !posState.isSavingOrder &&
+        getAllowedDiscountTypes().includes(nextDiscountType)
+      ) {
+        posState.discountType = nextDiscountType;
+        posState.discountValue = "";
+        posState.discountError = "";
         renderPos();
         publishCurrentCustomerDraft();
       }
@@ -2336,14 +2524,6 @@ function renderPlaceholder() {
   `;
 }
 
-async function loadMenuOverridesForPos() {
-  try {
-    await loadMenuOverrides();
-  } catch (error) {
-    console.error("Failed to load menu overrides for POS:", error);
-  }
-}
-
 async function startPos() {
   initializeCustomerDisplayChannel({
     getCurrentDraft: getCustomerDraft,
@@ -2351,13 +2531,16 @@ async function startPos() {
 
   await Promise.all([
     refreshSavedOrderCount(),
-    loadMenuOverridesForPos(),
-    loadTaxSettings(),
+    loadMenuOverrides(),
+    loadAllBusinessSettings(),
   ]);
 
-  posState.isTaxEnabled =
-    getTaxSettings().isGloballyEnabled && getTaxSettings().isEnabledByDefault;
+  const taxSettings = getTaxSettings();
 
+  posState.isTaxEnabled =
+    taxSettings.isGloballyEnabled && taxSettings.isEnabledByDefault;
+
+  normalizeDiscountType();
   renderPos();
   publishCurrentCustomerDraft();
 }
